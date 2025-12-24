@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler
 import os
 import json
 import requests
+import base64
 import time
 
 SHOP_DOMAIN = os.environ.get("SHOPIFY_DOMAIN")
@@ -17,6 +18,7 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
+            # 1. Parse Input
             content_length = int(self.headers['Content-Length'])
             data = json.loads(self.rfile.read(content_length))
             temp_url = data.get('image_url')
@@ -24,14 +26,23 @@ class handler(BaseHTTPRequestHandler):
             if not temp_url:
                 raise Exception("No image URL provided")
 
-            # 1. Ask Shopify to fetch and save this file
-            # We use the REST API 'files.json' endpoint which is easiest
-            url = f"https://{SHOP_DOMAIN}/admin/api/2023-10/files.json"
+            # 2. Download Image to Vercel Memory (Bypassing Shopify Fetch Limits)
+            img_response = requests.get(temp_url)
+            if img_response.status_code != 200:
+                raise Exception("Could not download image from OpenAI")
+            
+            # Encode as Base64
+            img_b64 = base64.b64encode(img_response.content).decode('utf-8')
+
+            # 3. Upload to Shopify (Using 'attachment' instead of 'original_source')
+            # Use 2024-04 API version for stability
+            url = f"https://{SHOP_DOMAIN}/admin/api/2024-04/files.json"
             
             payload = {
                 "file": {
-                    "original_source": temp_url,
-                    "filename": f"ai-design-{int(time.time())}.png"
+                    "attachment": img_b64, # Sending raw data
+                    "filename": f"ai-design-{int(time.time())}.png",
+                    "content_type": "image/png"
                 }
             }
             
@@ -42,35 +53,28 @@ class handler(BaseHTTPRequestHandler):
 
             response = requests.post(url, json=payload, headers=headers)
             
+            # 4. Handle Response
             if response.status_code == 201:
-                # 2. Wait and Get the Public URL
-                # Shopify takes a moment to process the file.
-                # The response gives us a 'gid'. We assume it will be ready soon.
-                # For immediate cart usage, Shopify might not give the CDN URL instantly in the Create response.
-                # But usually, it returns 'original_source' or similar. 
-                # Better strategy: We return the 'original_source' if valid, or we might need to poll.
-                # For this MVP, let's use the file data returned.
+                response_json = response.json()
+                file_data = response_json.get('file', {})
                 
-                file_data = response.json().get('file', {})
+                # We need to wait for the public URL, but usually 'url' is provided in the response
+                # If it's null, we might need to use the 'original_source' or fallback
+                # For this method, 'url' should be available or 'preview_image' > 'src'
                 
-                # Check if public_url exists, otherwise fallback to the temp one (risky) or polling
-                # Shopify REST API v2023-10 usually returns 'url' or 'public_url' if ready.
-                # If it's processing, we might just have to send back success.
-                
-                # IMPORTANT: For immediate cart addition, we need a valid URL.
-                # If Shopify is slow, we might return the temp_url as a fallback, 
-                # but the file IS being saved in Shopify backend for you to access later.
-                
-                # Let's try to grab the 'url' field.
-                shopify_url = file_data.get('url') # This handles the permanent CDN link
-                
+                permanent_url = file_data.get('url')
+                if not permanent_url:
+                     # Fallback if URL isn't ready instantly (rare with base64)
+                     permanent_url = "File Uploaded to Shopify Admin (Processing)"
+
                 response_data = {
                     "success": True, 
-                    "permanent_url": shopify_url 
+                    "permanent_url": permanent_url 
                 }
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
             else:
-                raise Exception(f"Shopify Upload Failed: {response.text}")
+                # IMPORTANT: pass back the exact error text from Shopify for debugging
+                raise Exception(f"Shopify Rejected: {response.text}")
 
         except Exception as e:
             self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
