@@ -5,7 +5,7 @@ import base64
 from io import BytesIO
 from openai import OpenAI
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
@@ -13,74 +13,56 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', '*') # Update domain in production
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data)
-
-        quote = data.get('quote', 'Hustle')
-        style = data.get('style', 'Minimalist')
-
-        # 1. The Art Direction Prompt
-        prompt = (
-            f"A high-fashion streetwear t-shirt graphic design. "
-            f"Style: {style}. "
-            f"The design should centrally feature the text: '{quote}'. "
-            f"Use high contrast, vector art style, isolated on a white background."
-        )
-
         try:
-            # 2. Generate Image (DALL-E 3)
-            # Note: DALL-E 3 takes 10-15s. If Vercel times out, we might need DALL-E 2.
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            quote = data.get('quote', 'Narrative')
+            style = data.get('style', 'Minimalist')
+
+            # 1. Generate Image (DALL-E 3)
+            prompt = (
+                f"A premium streetwear graphic design. Style: {style}. "
+                f"Central text: '{quote}'. Vector art style, high contrast, "
+                f"isolated on white background. Professional, 4k resolution."
             )
+            response = client.images.generate(
+                model="dall-e-3", prompt=prompt, size="1024x1024", quality="standard", n=1
+            )
+            
+            # This is the TEMPORARY link (Expires in 1 hour)
+            temp_url = response.data[0].url
 
-            image_url = response.data[0].url
-
-            # 3. Download & Watermark
-            img_response = requests.get(image_url)
+            # 2. Create Base64 Preview (Watermarked) for Frontend Display
+            img_response = requests.get(temp_url)
             img = Image.open(BytesIO(img_response.content))
-
-            # Add Watermark
             draw = ImageDraw.Draw(img)
-            # We don't have a custom font file, so we use default. 
-            # In a real app, you'd upload your font to the repo.
-            text = "MY NARRATIVE PREVIEW"
             
-            # Simple watermark logic
+            # Simple Watermark
             width, height = img.size
-            # Draw text in the center, semi-transparent logic requires RGBA
-            img = img.convert("RGBA")
-            txt_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
-            draw_txt = ImageDraw.Draw(txt_layer)
-            
-            # Position watermarks in a grid
-            for x in range(0, width, 300):
-                for y in range(0, height, 300):
-                    draw_txt.text((x, y), text, fill=(255, 255, 255, 128))
+            for x in range(0, width, 400):
+                for y in range(0, height, 400):
+                    draw.text((x+50, y+50), "PREVIEW", fill=(200, 200, 200))
 
-            combined = Image.alpha_composite(img, txt_layer)
-
-            # 4. Convert to Base64 to send back to browser
             buffered = BytesIO()
-            combined.convert("RGB").save(buffered, format="JPEG")
+            img.convert("RGB").save(buffered, format="JPEG", quality=40)
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-            response_data = {"success": True, "image": f"data:image/jpeg;base64,{img_str}"}
+            # Return Temp URL (hidden) and Base64 (visible)
+            # We send temp_url so the frontend can send it BACK to us if the user decides to buy.
+            response_data = {
+                "success": True, 
+                "image_preview": f"data:image/jpeg;base64,{img_str}",
+                "temp_url": temp_url 
+            }
             self.wfile.write(json.dumps(response_data).encode('utf-8'))
 
         except Exception as e:
-            error_response = {"success": False, "error": str(e)}
-            self.wfile.write(json.dumps(error_response).encode('utf-8'))
+            self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
 
     def do_OPTIONS(self):
         self.send_response(200)
