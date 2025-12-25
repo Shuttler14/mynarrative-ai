@@ -35,7 +35,7 @@ class handler(BaseHTTPRequestHandler):
 
             # 2. Upload to Shopify
             # FIX: Using '2025-04' (Extremely stable version)
-            url = f"https://{SHOP_DOMAIN}/admin/api/2025-04/files.json"
+            url = f"https://{SHOP_DOMAIN}/admin/api/2025-10/files.json"
             
             payload = {
                 "file": {
