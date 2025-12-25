@@ -1,12 +1,17 @@
 from http.server import BaseHTTPRequestHandler
-import os
 import json
 import requests
 import base64
 import time
 
-SHOP_DOMAIN = os.environ.get("SHOPIFY_DOMAIN")
-ACCESS_TOKEN = os.environ.get("SHOPIFY_ACCESS_TOKEN")
+# --- DEBUG MODE: HARDCODED CREDENTIALS ---
+# 1. Go to Shopify Admin > Settings > Domains. Copy the .myshopify.com one.
+#    Example: "mynarrative.myshopify.com" (NO https://, NO slashes)
+SHOP_DOMAIN = "jjdk0v-0c.myshopify.com" 
+
+# 2. Go to Shopify Admin > Apps > Develop Apps > Credentials. Copy the shpat_ token.
+ACCESS_TOKEN = "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"
+# -----------------------------------------
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -18,7 +23,6 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            # 1. Parse Input
             content_length = int(self.headers['Content-Length'])
             data = json.loads(self.rfile.read(content_length))
             temp_url = data.get('image_url')
@@ -26,21 +30,18 @@ class handler(BaseHTTPRequestHandler):
             if not temp_url:
                 raise Exception("No image URL provided")
 
-            # 2. Download Image to Vercel Memory (Bypassing Shopify Fetch Limits)
             img_response = requests.get(temp_url)
             if img_response.status_code != 200:
                 raise Exception("Could not download image from OpenAI")
             
-            # Encode as Base64
             img_b64 = base64.b64encode(img_response.content).decode('utf-8')
 
-            # 3. Upload to Shopify (Using 'attachment' instead of 'original_source')
-            # Use 2024-04 API version for stability
-            url = f"https://{SHOP_DOMAIN}/admin/api/2024-04/files.json"
+            # Using 2024-01 API version which is very stable
+            url = f"https://{SHOP_DOMAIN}/admin/api/2024-01/files.json"
             
             payload = {
                 "file": {
-                    "attachment": img_b64, # Sending raw data
+                    "attachment": img_b64,
                     "filename": f"ai-design-{int(time.time())}.png",
                     "content_type": "image/png"
                 }
@@ -53,28 +54,17 @@ class handler(BaseHTTPRequestHandler):
 
             response = requests.post(url, json=payload, headers=headers)
             
-            # 4. Handle Response
             if response.status_code == 201:
-                response_json = response.json()
-                file_data = response_json.get('file', {})
+                file_data = response.json().get('file', {})
+                # Try to get the URL, fallback to 'original_source' if needed
+                permanent_url = file_data.get('url') or file_data.get('original_source')
                 
-                # We need to wait for the public URL, but usually 'url' is provided in the response
-                # If it's null, we might need to use the 'original_source' or fallback
-                # For this method, 'url' should be available or 'preview_image' > 'src'
-                
-                permanent_url = file_data.get('url')
-                if not permanent_url:
-                     # Fallback if URL isn't ready instantly (rare with base64)
-                     permanent_url = "File Uploaded to Shopify Admin (Processing)"
-
-                response_data = {
-                    "success": True, 
-                    "permanent_url": permanent_url 
-                }
+                response_data = { "success": True, "permanent_url": permanent_url }
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
             else:
-                # IMPORTANT: pass back the exact error text from Shopify for debugging
-                raise Exception(f"Shopify Rejected: {response.text}")
+                # DEBUGGING: We are now printing the STATUS CODE + TEXT
+                error_msg = f"Status: {response.status_code} | Body: {response.text}"
+                raise Exception(f"Shopify Rejected: {error_msg}")
 
         except Exception as e:
             self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
