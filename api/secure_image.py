@@ -3,15 +3,20 @@ import json
 import requests
 import base64
 import time
+import os
 
-# --- DEBUG MODE: HARDCODED CREDENTIALS ---
-# 1. Go to Shopify Admin > Settings > Domains. Copy the .myshopify.com one.
-#    Example: "mynarrative.myshopify.com" (NO https://, NO slashes)
-SHOP_DOMAIN = "jjdk0v-0c.myshopify.com" 
+# --- CREDENTIALS ---
+# If you hardcoded them before, check if they are still correct.
+# Otherwise, we pull from Vercel environment variables (Recommended).
+SHOP_DOMAIN = os.environ.get("SHOPIFY_DOMAIN") 
+ACCESS_TOKEN = os.environ.get("SHOPIFY_ACCESS_TOKEN")
 
-# 2. Go to Shopify Admin > Apps > Develop Apps > Credentials. Copy the shpat_ token.
-ACCESS_TOKEN = "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"
-# -----------------------------------------
+# SAFETY FALLBACK: If environment variables are missing, use these hardcoded ones:
+# (Only rely on this if Vercel variables are failing you)
+if not SHOP_DOMAIN:
+    SHOP_DOMAIN = "jjdk0v-0c.myshopify.com" 
+if not ACCESS_TOKEN:
+    ACCESS_TOKEN = "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" # <--- CHECK THIS IF HARDCODING
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -30,14 +35,16 @@ class handler(BaseHTTPRequestHandler):
             if not temp_url:
                 raise Exception("No image URL provided")
 
+            # 1. Download from OpenAI
             img_response = requests.get(temp_url)
             if img_response.status_code != 200:
                 raise Exception("Could not download image from OpenAI")
             
             img_b64 = base64.b64encode(img_response.content).decode('utf-8')
 
-            # Using 2024-01 API version which is very stable
-            url = f"https://{SHOP_DOMAIN}/admin/api/2024-01/files.json"
+            # 2. Upload to Shopify
+            # FIX: Updated API Version to 2025-10 (Current supported version)
+            url = f"https://{SHOP_DOMAIN}/admin/api/2025-10/files.json"
             
             payload = {
                 "file": {
@@ -49,20 +56,21 @@ class handler(BaseHTTPRequestHandler):
             
             headers = {
                 "X-Shopify-Access-Token": ACCESS_TOKEN,
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept": "application/json" # Added to fix 406 error
             }
 
             response = requests.post(url, json=payload, headers=headers)
             
             if response.status_code == 201:
                 file_data = response.json().get('file', {})
-                # Try to get the URL, fallback to 'original_source' if needed
+                # Get the public URL
                 permanent_url = file_data.get('url') or file_data.get('original_source')
                 
                 response_data = { "success": True, "permanent_url": permanent_url }
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
             else:
-                # DEBUGGING: We are now printing the STATUS CODE + TEXT
+                # Debugging info
                 error_msg = f"Status: {response.status_code} | Body: {response.text}"
                 raise Exception(f"Shopify Rejected: {error_msg}")
 
