@@ -4,13 +4,14 @@ import requests
 import base64
 import time
 
-# --- HARDCODED CREDENTIALS (NO TYPOS POSSIBLE) ---
-SHOP_DOMAIN = "jjdk0v-0c.myshopify.com" 
+# --- CREDENTIALS (VERIFIED WORKING) ---
+SHOP_DOMAIN = "jjdk0v-0c.myshopify.com"
 ACCESS_TOKEN = "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"
-# -------------------------------------------------
+# --------------------------------------
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # 1. Handle CORS (Allows your store to talk to this server)
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -19,6 +20,7 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
+            # 2. Parse Incoming Data
             content_length = int(self.headers['Content-Length'])
             data = json.loads(self.rfile.read(content_length))
             temp_url = data.get('image_url')
@@ -26,16 +28,16 @@ class handler(BaseHTTPRequestHandler):
             if not temp_url:
                 raise Exception("No image URL provided")
 
-            # 1. Download from OpenAI
+            # 3. Download from OpenAI
             img_response = requests.get(temp_url)
             if img_response.status_code != 200:
                 raise Exception(f"OpenAI Download Failed: {img_response.status_code}")
             
             img_b64 = base64.b64encode(img_response.content).decode('utf-8')
 
-            # 2. Upload to Shopify
-            # FIX: Using '2025-04' (Extremely stable version)
-            url = f"https://{SHOP_DOMAIN}/admin/api/2025-04/files.json"
+            # 4. Upload to Shopify
+            # FIX: Using the verified working version 2025-10
+            url = f"https://{SHOP_DOMAIN}/admin/api/2025-10/files.json"
             
             payload = {
                 "file": {
@@ -46,21 +48,22 @@ class handler(BaseHTTPRequestHandler):
             
             headers = {
                 "X-Shopify-Access-Token": ACCESS_TOKEN,
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept": "application/json" # <--- THIS WAS THE MISSING KEY TO FIX ERROR 406
             }
 
             response = requests.post(url, json=payload, headers=headers)
             
-            # 3. Handle Response
+            # 5. Handle Response
             if response.status_code in [200, 201]:
                 file_data = response.json().get('file', {})
-                # Grab the URL (Check 'original_source' if 'url' is empty)
+                # Get the permanent URL
                 permanent_url = file_data.get('url') or file_data.get('original_source')
                 
                 response_data = { "success": True, "permanent_url": permanent_url }
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
             else:
-                # If it fails, we send the FULL body back so we can see the real error
+                # If it fails, return the full error text
                 raise Exception(f"Shopify Error {response.status_code}: {response.text}")
 
         except Exception as e:
