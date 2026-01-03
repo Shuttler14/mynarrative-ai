@@ -25,23 +25,36 @@ class handler(BaseHTTPRequestHandler):
             # Use Gemini 1.5 Flash for speed
             model = genai.GenerativeModel('gemini-1.5-flash')
 
+            # --- THE "NERVE-TOUCHING" PROMPT ---
             prompt = f"""
-            You are a creative streetwear copywriter.
-            Topic: {topic}
-            Tone: {tone}
+            Role: You are a visionary Creative Director for a high-end streetwear brand. You understand subcultures, internet humor, and deep human psychology.
             
-            Task: Write 4 short, punchy, unique slogans (max 6 words each) for a t-shirt/hoodie design.
+            Context: The user wants a design based on:
+            TOPIC: {topic}
+            TONE: {tone}
             
-            STRICT OUTPUT RULES:
-            - Return ONLY a raw JSON array of strings.
-            - No markdown formatting (no ```json or ```).
-            - No numbering (1., 2.).
-            - Example output: ["Dream Big", "Stay Wild", "No Limits", "Just Do It"]
+            Task: Generate 10 unique, punchy, and highly resonant slogans.
+            
+            CRITICAL RULES FOR "NERVE-TOUCHING" IMPACT:
+            1. NO CLICHÉS: Avoid generic phrases like "Eat Sleep Repeat" or "Keep Calm."
+            2. THE UNSAID TRUTH: Don't describe the topic; reveal the hidden feeling behind it. (e.g., Instead of "I love coffee," say "Survival Juice" or "Caffeine until I feel feelings.")
+            3. VARY THE LENGTH: Mix 2-word punches with 5-6 word statements.
+            4. AESTHETIC: The text must look good on a shirt. Minimalist, bold, or gritty.
+            
+            TONE SPECIFICS:
+            - If Sarcastic: Be dry, witty, slightly mean, or self-deprecating.
+            - If Dark: Be gothic, nihilistic, mysterious.
+            - If Motivational: Be aggressive, stoic, disciplined (not cheesy).
+            - If Luxury: Be arrogant, minimal, expensive, exclusive.
+            
+            OUTPUT FORMAT:
+            Return ONLY a raw JSON array of strings. No markdown.
+            Example: ["Slogan 1", "Slogan 2", "Slogan 3"]
             """
 
             response = model.generate_content(prompt)
             
-            # Clean response text just in case Gemini adds Markdown
+            # Clean response text
             clean_text = response.text.strip()
             if clean_text.startswith("```json"):
                 clean_text = clean_text[7:-3]
