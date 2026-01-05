@@ -3,7 +3,7 @@ import json
 import os
 from openai import OpenAI
 
-# Initialize OpenAI Client (Uses the same key as your Image Generator)
+# Initialize OpenAI Client
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 class handler(BaseHTTPRequestHandler):
@@ -24,9 +24,10 @@ class handler(BaseHTTPRequestHandler):
             topic = body.get('topic', 'fashion')
             tone = body.get('tone', 'motivational')
 
-            # 3. The "Creative Director" Prompt (Adapted for GPT)
+            # 3. The "Creative Director" System Instruction
             system_instruction = "You are a visionary Creative Director for a high-end streetwear brand. You understand subcultures, internet humor, and deep human psychology."
             
+            # 4. The Enhanced User Prompt
             user_prompt = f"""
             The user wants a t-shirt design based on:
             TOPIC: {topic}
@@ -35,30 +36,30 @@ class handler(BaseHTTPRequestHandler):
             Task: Generate 10 unique, punchy, and highly resonant slogans.
             
             CRITICAL RULES:
-            1. NO CLICHÉS: Avoid generic phrases like "Eat Sleep Repeat."
+            1. NO CLICHÉS: Avoid generic phrases like "Eat Sleep Repeat" or "Live Laugh Love."
             2. THE UNSAID TRUTH: Don't describe the topic; reveal the hidden feeling behind it.
             3. AESTHETIC: The text must look good on a shirt. Minimalist, bold, or gritty.
             4. VARY LENGTH: Mix short 2-word punches with 5-6 word statements.
+            5. STRICT ORIGINALITY: Do not use existing famous quotes or common sayings. Invent completely new, un-googlable phrases that feel fresh and subcultural.
             
             OUTPUT FORMAT:
             Return ONLY a raw JSON array of strings. 
             Example: ["Slogan 1", "Slogan 2", "Slogan 3"]
             """
 
-            # 4. Call OpenAI API
+            # 5. Call OpenAI API
             completion = client.chat.completions.create(
-                model="gpt-4o-mini", # Smart, Fast, Cost-Effective
+                model="gpt-4o-mini", 
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.8 # High creativity
+                temperature=0.85 # Slightly higher creativity for unique phrases
             )
 
-            # 5. Clean & Parse Response
+            # 6. Clean & Parse Response
             raw_text = completion.choices[0].message.content.strip()
             
-            # Remove Markdown formatting if GPT adds it (e.g. ```json ... ```)
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:-3]
             elif raw_text.startswith("```"):
