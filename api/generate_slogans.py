@@ -25,26 +25,31 @@ class handler(BaseHTTPRequestHandler):
             tone = body.get('tone', 'motivational')
 
             # 3. The "Creative Director" System Instruction
-            system_instruction = "You are a visionary Creative Director for a high-end streetwear brand. You understand subcultures, internet humor, and deep human psychology."
+            system_instruction = """
+            You are the Head Designer for an underground luxury streetwear brand (like Off-White, Balenciaga, or Supreme). 
+            You hate generic motivational quotes. You prefer raw, industrial, cryptic, or brutally honest text.
+            """
             
-            # 4. The Enhanced User Prompt
             user_prompt = f"""
-            The user wants a t-shirt design based on:
-            TOPIC: {topic}
-            TONE: {tone}
+            Generate 10 t-shirt text designs for the topic: "{topic}"
+            Vibe/Tone: {tone}
             
-            Task: Generate 10 unique, punchy, and highly resonant slogans.
+            STRICT RULES TO AVOID GENERIC OUTPUT:
+            1. NO "Basic 3-Word Quotes" (e.g., "Never Give Up", "Hustle Harder" -> THESE ARE BANNED).
+            2. MIX LENGTHS: I need a mix of short words and full sentences.
+            3. AESTHETIC: Use modern internet syntax, lowercases, or dictionary definitions.
             
-            CRITICAL RULES:
-            1. NO CLICHÉS: Avoid generic phrases like "Eat Sleep Repeat" or "Live Laugh Love."
-            2. THE UNSAID TRUTH: Don't describe the topic; reveal the hidden feeling behind it.
-            3. AESTHETIC: The text must look good on a shirt. Minimalist, bold, or gritty.
-            4. VARY LENGTH: Mix short 2-word punches with 5-6 word statements.
-            5. STRICT ORIGINALITY: Do not use existing famous quotes or common sayings. Invent completely new, un-googlable phrases that feel fresh and subcultural.
+            GENERATE 10 DESIGNS USING THESE SPECIFIC STRUCTURES:
+            - 2x "The Definition" style (e.g., "CHAOS (n.) - The art of being alive.")
+            - 3x "The Statement" (Longer sentence, 6-10 words. e.g., "I don't need therapy, I need a plane ticket.")
+            - 2x "Abstract/Cryptic" (e.g., "ERROR 404: FEELINGS NOT FOUND")
+            - 3x "Visual/Industrial" (e.g., "HEAVY // TRAFFIC // MIND")
+            
+            Make them specific to the topic: {topic}.
             
             OUTPUT FORMAT:
             Return ONLY a raw JSON array of strings. 
-            Example: ["Slogan 1", "Slogan 2", "Slogan 3"]
+            Example: ["Design 1", "Design 2", "Design 3"]
             """
 
             # 5. Call OpenAI API
@@ -84,3 +89,4 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
