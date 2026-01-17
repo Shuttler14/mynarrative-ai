@@ -4,14 +4,11 @@ import json
 import base64
 from io import BytesIO
 from openai import OpenAI
-import httpx
 import requests
 from PIL import Image, ImageDraw
 
 client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
-    http_client=httpx.Client(timeout=30000.0)
-)
+    api_key=os.environ.get("OPENAI_API_KEY"))
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -73,6 +70,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
 
 
 
