@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 client = OpenAI(
     api_key=os.environ.get("OPENAI_API_KEY")
-    http_client=httpx.Client(timeout=30.0)
+    http_client=httpx.Client(timeout=30000.0)
 )
 
 class handler(BaseHTTPRequestHandler):
@@ -73,5 +73,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
 
 
