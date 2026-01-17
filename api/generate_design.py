@@ -4,6 +4,7 @@ import json
 import base64
 from io import BytesIO
 from openai import OpenAI
+import httpx
 import requests
 from PIL import Image, ImageDraw
 
@@ -72,4 +73,5 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
 
