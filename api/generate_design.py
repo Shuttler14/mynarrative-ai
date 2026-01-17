@@ -19,23 +19,17 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            content_length = int(self.headers['Content-Length'])
-            data = json.loads(self.rfile.read(content_length))
-            quote = data.get('quote', 'Narrative')
-            style = data.get('style', 'Minimalist')
+            # Simplified prompt for speed
+            test_prompt = f"A cool, high-contrast streetwear graphic design badge. Minimalist vector style. Theme: {style}. Text content: '{quote}'"
 
-            # 1. Generate Image (DALL-E 3)
-            prompt = (
-                f"A premium streetwear graphic design. Style: {style}. "
-                f"Central text: '{quote}'. Vector art style, high contrast, "
-                f"isolated on white background. Professional, 4k resolution."
-            )
             response = client.images.generate(
-                model="dall-e-3", prompt=prompt, size="1024x1024", quality="standard", n=1
+                model="dall-e-2",       # <--- SWAPPED TO DALL-E 2 (The Fast Model)
+                prompt=test_prompt,
+                size="512x512",         # <--- Smaller size is faster (Canvas scales it anyway)
+                n=1,
             )
-            
-            # This is the TEMPORARY link (Expires in 1 hour)
-            temp_url = response.data[0].url
+
+            image_url = response.data[0].url
 
             # 2. Create Base64 Preview (Watermarked) for Frontend Display
             img_response = requests.get(temp_url)
@@ -70,3 +64,4 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
