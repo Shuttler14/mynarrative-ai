@@ -7,7 +7,10 @@ from openai import OpenAI
 import requests
 from PIL import Image, ImageDraw
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY")
+    http_client=httpx.Client(timeout=30.0)
+)
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -69,3 +72,4 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
