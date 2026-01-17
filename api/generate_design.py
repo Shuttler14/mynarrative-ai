@@ -11,22 +11,25 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # --- 1. READ THE REQUEST BODY (This was missing) ---
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+
+        # --- 2. SEND HEADERS ---
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*') # Update domain in production
+        self.send_header('Access-Control-Allow-Origin', '*') 
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
         try:
+            # --- 3. PARSE DATA ---
             data = json.loads(post_data)
             quote = data.get('quote', 'No Slogan')
-            # ERROR FIX: Explicitly define 'style' here
             style = data.get('style', 'Streetwear') 
 
-            # --- FAST GENERATION (DALL-E 2) ---
-            # Using DALL-E 2 for <4 second generation to test coordinates
-            
+            # --- 4. FAST GENERATION (DALL-E 2) ---
             test_prompt = f"A cool, high-contrast streetwear graphic design badge. Minimalist vector style. Theme: {style}. Text content: '{quote}'"
 
             response = client.images.generate(
@@ -37,8 +40,9 @@ class handler(BaseHTTPRequestHandler):
             )
 
             image_url = response.data[0].url
+            temp_url = image_url  # Assigning to temp_url for use below
 
-            # 2. Create Base64 Preview (Watermarked) for Frontend Display
+            # --- 5. WATERMARK & PREVIEW ---
             img_response = requests.get(temp_url)
             img = Image.open(BytesIO(img_response.content))
             draw = ImageDraw.Draw(img)
@@ -53,8 +57,7 @@ class handler(BaseHTTPRequestHandler):
             img.convert("RGB").save(buffered, format="JPEG", quality=40)
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-            # Return Temp URL (hidden) and Base64 (visible)
-            # We send temp_url so the frontend can send it BACK to us if the user decides to buy.
+            # --- 6. SEND SUCCESS RESPONSE ---
             response_data = {
                 "success": True, 
                 "image_preview": f"data:image/jpeg;base64,{img_str}",
@@ -63,6 +66,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response_data).encode('utf-8'))
 
         except Exception as e:
+            # Send Error Response
             self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
 
     def do_OPTIONS(self):
@@ -71,5 +75,3 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-
-
