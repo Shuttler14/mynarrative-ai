@@ -19,13 +19,20 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            # Simplified prompt for speed
+            data = json.loads(post_data)
+            quote = data.get('quote', 'No Slogan')
+            # ERROR FIX: Explicitly define 'style' here
+            style = data.get('style', 'Streetwear') 
+
+            # --- FAST GENERATION (DALL-E 2) ---
+            # Using DALL-E 2 for <4 second generation to test coordinates
+            
             test_prompt = f"A cool, high-contrast streetwear graphic design badge. Minimalist vector style. Theme: {style}. Text content: '{quote}'"
 
             response = client.images.generate(
-                model="dall-e-2",       # <--- SWAPPED TO DALL-E 2 (The Fast Model)
+                model="dall-e-2", 
                 prompt=test_prompt,
-                size="512x512",         # <--- Smaller size is faster (Canvas scales it anyway)
+                size="512x512",
                 n=1,
             )
 
@@ -64,4 +71,5 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
 
