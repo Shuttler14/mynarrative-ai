@@ -1,10 +1,14 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import re
 from openai import OpenAI
 
-# Initialize OpenAI Client
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Initialize NVIDIA API Client with DeepSeek
+client = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key="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"
+)
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -60,9 +64,9 @@ The reader's brain catches on the contradiction. That pause IS the impact.
 
 TECHNIQUE 3: THE UNSAID
 What you DON'T say is louder than what you do. Leave a gap the reader fills with their own story.
-- "I outgrew people I once prayed for." (What happened? Who? The reader fills it in with THEIR person.)
-- "Some nights I miss who I was becoming." (Not who I was. Who I was BECOMING. That one word changes everything.)
-- "I stopped explaining myself." (Why? To whom? The reader already knows because they've LIVED it.)
+- "I outgrew people I once prayed for."
+- "Some nights I miss who I was becoming."
+- "I stopped explaining myself."
 The reader should project their OWN life onto your words. That's when it becomes personal.
 
 TECHNIQUE 4: THE REFRAME
@@ -74,16 +78,16 @@ This makes the reader feel SEEN in something they were ashamed of.
 
 TECHNIQUE 5: THE SPECIFIC DETAIL
 Generic = forgettable. Specific = intimate. One concrete detail makes it feel REAL.
-- NOT "I work hard" → YES "4am alarm. No audience."
-- NOT "I love driving" → YES "The highway doesn't ask where I've been."
-- NOT "I like being alone" → YES "Table for one. Best conversation I've had all week."
+- NOT "I work hard" but "4am alarm. No audience."
+- NOT "I love driving" but "The highway doesn't ask where I've been."
+- NOT "I like being alone" but "Table for one. Best conversation I've had all week."
 Specificity creates the illusion that you KNOW the reader personally.
 
 TECHNIQUE 6: THE DOUBLE MEANING
 Surface level reads one way. Underneath, it means something completely different.
 - "Heavy." (Weight? Emotions? Life? All of them.)
 - "Still loading." (Tech reference? Personal growth? Mental state? Yes.)
-- "Under construction. Don't get comfortable." (Building? Rebuilding self? Warning to others?)
+- "Under construction. Don't get comfortable."
 The reader should be able to read it twice and get a different meaning each time.
 
 ═══════════════════════════════════════════
@@ -155,6 +159,7 @@ OUTPUT:
 
 Return ONLY the 8 slogans. One per line.
 No numbering. No bullets. No quotes. No labels. No preamble. No emojis. No explanation.
+No thinking tags or reasoning blocks in the output.
 Just 8 raw lines.
 """
 
@@ -206,26 +211,35 @@ Every line should have a SECOND LAYER that reveals itself on re-read.
 The test: if someone reads the slogan and does NOT pause, 
 even for half a second — you failed. Rewrite.
 
-Write 8 slogans now.
+Write 8 slogans now. Output ONLY the 8 lines, nothing else.
 """
 
-            # 5. Call OpenAI API
+            # 5. Call NVIDIA DeepSeek API (Streaming)
             completion = client.chat.completions.create(
-                model="gpt-4o-mini", 
+                model="deepseek-ai/deepseek-v3.2",
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.95,
-                frequency_penalty=0.9,
-                presence_penalty=0.6,
-                max_tokens=500
+                temperature=1,
+                top_p=0.95,
+                max_tokens=8192,
+                extra_body={"chat_template_kwargs": {"thinking": True}},
+                stream=True
             )
 
-            # 6. Clean & Parse Response
-            raw_text = completion.choices[0].message.content.strip()
-            
-            # Robust line-based parsing
+            # 6. Collect streamed response — ONLY content, NOT reasoning
+            full_content = ""
+            for chunk in completion:
+                if not getattr(chunk, "choices", None):
+                    continue
+                # Skip reasoning/thinking tokens — we only want final output
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    full_content += chunk.choices[0].delta.content
+
+            raw_text = full_content.strip()
+
+            # 7. Clean & Parse Response
             slogans = []
             for line in raw_text.split("\n"):
                 cleaned = line.strip()
@@ -233,7 +247,7 @@ Write 8 slogans now.
                 # Remove common artifacts
                 cleaned = cleaned.strip('"').strip("'").strip('\u2014').strip('\u2013').strip('-').strip()
                 
-                # Skip empty, too short, or label lines
+                # Skip empty, too short, or label/preamble lines
                 if not cleaned or len(cleaned) < 3:
                     continue
                 if cleaned.upper().startswith("SLOGAN"):
@@ -242,13 +256,17 @@ Write 8 slogans now.
                     continue
                 if cleaned.upper().startswith("SURE"):
                     continue
+                if cleaned.startswith("<think") or cleaned.startswith("</think"):
+                    continue
                     
                 # Remove leading numbering (1. or 1) or 01. etc)
-                import re
                 cleaned = re.sub(r'^\d+[\.\)\-\:]\s*', '', cleaned).strip()
                 
                 # Remove leading bullet chars
                 cleaned = cleaned.lstrip('•').lstrip('*').lstrip('>').strip()
+                
+                # Remove wrapping quotes one more time after all cleanup
+                cleaned = cleaned.strip('"').strip("'").strip()
                 
                 if cleaned and len(cleaned) >= 3:
                     slogans.append(cleaned)
