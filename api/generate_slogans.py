@@ -7,7 +7,7 @@ from openai import OpenAI
 # Initialize NVIDIA API Client with DeepSeek
 client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
-    api_key="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"
+    api_key=os.environ.get("NVIDIA_API_KEY")
 )
 
 class handler(BaseHTTPRequestHandler):
@@ -291,3 +291,4 @@ Write 8 slogans now. Output ONLY the 8 lines, nothing else.
         self.send_header('Access-Control-Allow-Methods', 'POST')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
