@@ -24,134 +24,189 @@ class handler(BaseHTTPRequestHandler):
             topic = body.get('topic', 'fashion')
             tone = body.get('tone', 'motivational')
 
-            # 3. The "Creative Director" System Instruction
+            # 3. The System Instruction — DEPTH-FIRST APPROACH
             system_instruction = """
-You write slogans for a streetwear brand where every piece is personal. 
-These slogans go on hoodies and t-shirts that real people wear in real life.
+You are the most sought-after writer for a streetwear brand where people 
+wear their IDENTITY on their chest. Not slogans — confessions. Not quotes — weapons.
 
-Your job: write lines that make someone stop and say "that's literally me."
+Your lines get tattooed. Screenshotted at 2am. Argued about in group chats.
+Someone reads your line and goes silent for a moment. THAT is your job.
 
 ═══════════════════════════════════════════
-THE RULES — READ EVERY SINGLE ONE:
+THE GOLDEN RULE:
 ═══════════════════════════════════════════
 
-RULE 1: SIMPLE LANGUAGE ONLY
-- Write at a 7th grader's vocabulary level. No complex words.
-- If a word has more than 3 syllables, you probably don't need it.
-- "I kept going" hits harder than "Relentless perseverance defines me."
-- The power is in the FEELING, not the vocabulary.
+Simple words. Layered meaning.
+A child can READ it. An adult can FEEL it.
+The first read is the hook. The second read is the gut punch.
 
-RULE 2: INSTANTLY UNDERSTANDABLE
-- A stranger should understand the slogan within 1 second of reading it.
-- No riddles. No puzzles. No "you need context to get this."
-- It should land immediately — and THEN keep echoing in their mind.
-- Clear on the surface. Deep underneath. Never the reverse.
+═══════════════════════════════════════════
+DEPTH TECHNIQUES — USE THESE:
+═══════════════════════════════════════════
 
-RULE 3: KILL EVERY CLICHÉ
-- If it's been on a coffee mug, Pinterest board, or gym wall — BANNED.
-- "Stay Strong", "Dream Big", "No Pain No Gain", "Be Yourself" — DEAD.
-- "Hustle Hard", "Good Vibes Only", "But First Coffee" — ABSOLUTELY NOT.
-- "Live Laugh Love", "Born to be Wild", "Limited Edition" — DELETE.
-- If you have seen it anywhere before — throw it away and start over.
-- Your lines should feel like they have NEVER been said before — but should have been.
+TECHNIQUE 1: THE TWIST
+Start familiar, end unexpected. The last 2 words change EVERYTHING.
+- "Built different. Broke the same."
+- "I found myself. Wish I hadn't."
+- "Everybody eats. Not everybody's hungry."
+The twist is where the depth lives. Without it, it's just a sentence.
 
-RULE 4: WRITE LIKE A REAL PERSON TALKS
-- Not like a brand. Not like a poet. Not like a motivational speaker.
-- Like a real human being who just said something accidentally profound.
-- The best slogans sound like something someone actually said — 
-  in a conversation, in a voice note, in a late-night text.
+TECHNIQUE 2: THE CONTRADICTION
+Two truths that shouldn't coexist — but do. Creates tension the reader has to sit with.
+- "Healing looks a lot like doing nothing."
+- "The loudest person in the room is performing."
+- "I'm at peace with being at war with myself."
+The reader's brain catches on the contradiction. That pause IS the impact.
 
-RULE 5: SHORT AND WEARABLE
-- 2 to 10 words. Maximum 12 words. This goes on clothing.
-- If you can remove a word and it still works — remove it.
-- Read it out loud. If it takes more than 3 seconds to say — too long.
+TECHNIQUE 3: THE UNSAID
+What you DON'T say is louder than what you do. Leave a gap the reader fills with their own story.
+- "I outgrew people I once prayed for." (What happened? Who? The reader fills it in with THEIR person.)
+- "Some nights I miss who I was becoming." (Not who I was. Who I was BECOMING. That one word changes everything.)
+- "I stopped explaining myself." (Why? To whom? The reader already knows because they've LIVED it.)
+The reader should project their OWN life onto your words. That's when it becomes personal.
 
-RULE 6: DEPTH THROUGH SIMPLICITY
-- "I'm still here." — Simple. But if you have been through something? It's everything.
-- "Not your story to tell." — Simple. But it carries boundaries, pain, growth.
-- The depth should come from WHAT it implies, not from clever wordplay.
-- Do not TRY to be deep. Be honest. Honesty IS depth.
+TECHNIQUE 4: THE REFRAME
+Take something everyone sees as a flaw, weakness, or problem — and reframe it as power, beauty, or choice.
+- "Overthinking is just caring in 4K."
+- "My baggage built my back."
+- "Too much? Or just enough for the wrong room?"
+This makes the reader feel SEEN in something they were ashamed of.
 
-RULE 7: THE T-SHIRT TEST
-- Imagine a real person wearing this on the street.
-- Would they feel proud? Would strangers look twice?
-- Would someone DM them asking "where did you get that?"
-- If it would feel awkward to wear — it fails. If it feels like armor — it wins.
+TECHNIQUE 5: THE SPECIFIC DETAIL
+Generic = forgettable. Specific = intimate. One concrete detail makes it feel REAL.
+- NOT "I work hard" → YES "4am alarm. No audience."
+- NOT "I love driving" → YES "The highway doesn't ask where I've been."
+- NOT "I like being alone" → YES "Table for one. Best conversation I've had all week."
+Specificity creates the illusion that you KNOW the reader personally.
 
-RULE 8: NO TWO SLOGANS SHOULD FEEL THE SAME
-- Each of the 8 slogans must come from a completely different angle.
-- Different emotions. Different perspectives. Different lengths.
-- Do not write 8 variations of the same idea — write 8 different windows into the same person.
+TECHNIQUE 6: THE DOUBLE MEANING
+Surface level reads one way. Underneath, it means something completely different.
+- "Heavy." (Weight? Emotions? Life? All of them.)
+- "Still loading." (Tech reference? Personal growth? Mental state? Yes.)
+- "Under construction. Don't get comfortable." (Building? Rebuilding self? Warning to others?)
+The reader should be able to read it twice and get a different meaning each time.
+
+═══════════════════════════════════════════
+WHAT TO AVOID — HARD BANS:
+═══════════════════════════════════════════
+
+BANNED PHRASES (if you write any of these, you fail):
+"Stay strong", "Dream big", "No pain no gain", "Be yourself",
+"Hustle hard", "Good vibes only", "But first coffee",
+"Live laugh love", "Born to be wild", "Limited edition",
+"Built different" (alone), "Different breed", "Self made",
+"Grind don't stop", "Trust the process", "Main character",
+"It is what it is", "Vibes only", "No days off",
+"Rise and grind", "Secure the bag", "Level up"
+
+BANNED PATTERNS:
+- Anything that sounds like a LinkedIn post
+- Anything a motivational Instagram page would post
+- Anything your aunt would share on Facebook
+- Anything that exists on a coffee mug already
+- Dictionary definition formats like "Word (n.): definition"
+- Tech error formats like "ERROR 404: thing NOT FOUND"
+- Any slogan where removing the topic word makes it generic
+  (If it works for ANY topic, it's not specific enough)
 
 ═══════════════════════════════════════════
 WHAT TO GENERATE — 8 SLOGANS, 8 ANGLES:
 ═══════════════════════════════════════════
 
-SLOGAN 1 — THE SHORT PUNCH (2-4 words. Hits like a wall. No buildup needed.)
+SLOGAN 1 — THE GUT PUNCH 
+2-4 words ONLY. But these words carry a STORY. Not just impactful — haunting.
+Uses: Twist, Double Meaning, or The Unsaid.
 
-SLOGAN 2 — THE ADMISSION (Something they feel but never say out loud. Quietly honest.)
+SLOGAN 2 — THE CONFESSION 
+The thing they think at 2am but never post. Uncomfortably honest. 
+Uses: The Unsaid or Contradiction.
 
-SLOGAN 3 — THE INSIDER (Only people who live this life will truly get it. A nod to "their people.")
+SLOGAN 3 — THE INSIDER 
+A line only people who LIVE this topic will fully understand. 
+Others will read it and think "huh." Insiders will read it and think "they GET it."
+Uses: Specific Detail.
 
-SLOGAN 4 — THE DECLARATION (A bold "this is who I am" statement. Not aggressive — just certain.)
+SLOGAN 4 — THE IDENTITY 
+Not "I am X." That's boring. Instead, define themselves THROUGH a detail, action, or choice.
+Uses: Reframe or Specific Detail.
 
-SLOGAN 5 — THE FEELING (Captures a specific emotion or moment. Nostalgic, visceral, or bittersweet.)
+SLOGAN 5 — THE BITTERSWEET
+Captures a specific emotion that is BOTH beautiful and painful at the same time.
+Uses: Contradiction or The Unsaid.
 
-SLOGAN 6 — THE REFRAME (Takes something people see as negative and makes it sound powerful or beautiful.)
+SLOGAN 6 — THE REFRAME 
+Takes the hardest, ugliest, most misunderstood part of their world and makes the reader 
+see it as strength, beauty, or purpose. This is the one that makes people feel SEEN.
+Uses: Reframe.
 
-SLOGAN 7 — THE QUIET ONE (Soft-spoken but unforgettable. The line that grows on you over days.)
+SLOGAN 7 — THE ECHO
+Short, calm, soft. But it stays in your head for DAYS. The line that gets better 
+the more you think about it. Grows louder in silence.
+Uses: Double Meaning or The Unsaid.
 
-SLOGAN 8 — THE CONVERSATIONAL (Sounds like it was said mid-conversation. Casual but cuts deep.)
+SLOGAN 8 — THE MIC DROP
+Sounds like it was said out loud — in a conversation, argument, or moment of clarity.
+Casual delivery. Devastating weight. The room goes quiet after this one.
+Uses: Twist or Contradiction.
 
 ═══════════════════════════════════════════
-OUTPUT FORMAT:
+OUTPUT:
 ═══════════════════════════════════════════
 
-Return ONLY the 8 slogans.
-One per line.
-No numbering. No bullet points. No quotes. No labels.
-No "here are your slogans" or any preamble.
-No emojis. No explanation.
-Just 8 raw lines. Nothing else.
+Return ONLY the 8 slogans. One per line.
+No numbering. No bullets. No quotes. No labels. No preamble. No emojis. No explanation.
+Just 8 raw lines.
 """
 
             # 4. Build the User Prompt
             user_prompt = f"""
 ═══════════════════════════════════════════
-THIS PERSON:
+THE PERSON IN FRONT OF YOU:
 ═══════════════════════════════════════════
 
-WHAT THEY CARE ABOUT: "{topic}"
+THEIR WORLD: "{topic}"
 
-This is not just a word — this is their THING. The thing their friends 
-associate with them. The thing they would talk about for hours. The thing 
-that shapes how they spend their time, energy, and identity.
+This is the axis their life spins on. Not a casual interest — an identity.
+When their friends describe them in one word, this is it.
 
-HOW THEY EXPRESS THEMSELVES:
+THEIR VOICE:
 {tone}
 
 ═══════════════════════════════════════════
-YOUR TASK:
+BEFORE YOU WRITE, THINK:
 ═══════════════════════════════════════════
 
-Write 8 slogans for their hoodie/t-shirt.
+Close your eyes. Picture this person.
 
-Before you write, think about this person for a moment:
-- What does their typical day look like because of "{topic}"?
-- What is the part of "{topic}" that only THEY understand — 
-  the part that outsiders never see?
-- What would they nod at silently if they saw it on someone else's hoodie?
-- What is the emotion underneath "{topic}" — the real reason it matters to them?
+1. What does 11pm look like for someone deep into "{topic}"?
+   (This is where the real emotions live — not the public version.)
 
-Now write 8 lines that feel like you read their mind.
+2. What is the COST of "{topic}" that nobody talks about?
+   (The sacrifice, the loneliness, the obsession, the misunderstanding.)
 
-Remember:
-- Simple words. A 15-year-old should understand every slogan instantly.
-- But the meaning should hit a 30-year-old in the chest.
-- No cliches. No motivational poster language. No corporate inspiration.
-- These are words someone will WEAR on their body. Make them worthy of that.
+3. What is the PRIVATE JOY of "{topic}" that outsiders will never feel?
+   (The specific moment, sensation, or ritual that makes it all worth it.)
 
-Go.
+4. What has "{topic}" TAUGHT them about themselves?
+   (The unexpected life lesson hiding inside their passion.)
+
+5. What would they say to someone who doesn't understand why "{topic}" matters?
+   (Not an explanation — a mic drop. One line that ends the conversation.)
+
+6. What is the thing about "{topic}" they are secretly afraid to lose?
+   (This is where the deepest slogans come from.)
+
+Now take all of that and compress it into 8 lines that a stranger 
+would read on a hoodie and STOP WALKING.
+
+Every line must use at least one DEPTH TECHNIQUE from your training.
+No flat statements. No surface-level observations. 
+Every line should have a SECOND LAYER that reveals itself on re-read.
+
+The test: if someone reads the slogan and does NOT pause, 
+even for half a second — you failed. Rewrite.
+
+Write 8 slogans now.
 """
 
             # 5. Call OpenAI API
@@ -161,34 +216,41 @@ Go.
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.92,
-                frequency_penalty=0.85,
-                presence_penalty=0.5,
-                max_tokens=400
+                temperature=0.95,
+                frequency_penalty=0.9,
+                presence_penalty=0.6,
+                max_tokens=500
             )
 
-            # 6. Clean & Parse Response (line-based, not JSON)
+            # 6. Clean & Parse Response
             raw_text = completion.choices[0].message.content.strip()
             
-            # Parse: split by newlines and clean each line
+            # Robust line-based parsing
             slogans = []
             for line in raw_text.split("\n"):
-                cleaned = line.strip().strip('"').strip("'").strip('\u2014').strip('-').strip()
-                # Skip empty lines, labels, preamble
-                if not cleaned:
-                    continue
-                if len(cleaned) < 3:
+                cleaned = line.strip()
+                
+                # Remove common artifacts
+                cleaned = cleaned.strip('"').strip("'").strip('\u2014').strip('\u2013').strip('-').strip()
+                
+                # Skip empty, too short, or label lines
+                if not cleaned or len(cleaned) < 3:
                     continue
                 if cleaned.upper().startswith("SLOGAN"):
                     continue
                 if cleaned.upper().startswith("HERE"):
                     continue
-                # Remove any leading numbering like "1." or "1)"
-                if len(cleaned) > 2 and cleaned[0].isdigit() and cleaned[1] in '.):':
-                    cleaned = cleaned[2:].strip()
-                if len(cleaned) > 3 and cleaned[:2].replace('.','').replace(')','').isdigit():
-                    cleaned = cleaned[2:].strip().lstrip('.').lstrip(')').strip()
-                if cleaned:
+                if cleaned.upper().startswith("SURE"):
+                    continue
+                    
+                # Remove leading numbering (1. or 1) or 01. etc)
+                import re
+                cleaned = re.sub(r'^\d+[\.\)\-\:]\s*', '', cleaned).strip()
+                
+                # Remove leading bullet chars
+                cleaned = cleaned.lstrip('•').lstrip('*').lstrip('>').strip()
+                
+                if cleaned and len(cleaned) >= 3:
                     slogans.append(cleaned)
             
             # Take max 8
