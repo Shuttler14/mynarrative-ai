@@ -5,7 +5,7 @@ from openai import OpenAI
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        # 1. SETUP CORS & HEADERS
+        # 1. SETUP CORS
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -14,14 +14,14 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            # 2. INITIALIZE CLIENT (Securely inside request)
+            # 2. AUTH & CLIENT
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("Server configuration error: Missing API Key")
+                raise ValueError("Missing API Key on Server")
             
             client = OpenAI(api_key=api_key)
 
-            # 3. PARSE REQUEST
+            # 3. PARSE DATA
             content_length = int(self.headers['Content-Length'])
             body = json.loads(self.rfile.read(content_length))
             
@@ -29,16 +29,12 @@ class handler(BaseHTTPRequestHandler):
             ctx = body.get('currentContext', {})
             mode = ctx.get('mode', 'self')
 
-            # 4. SELECT STRATEGY & PROMPT
+            # 4. PROMPT ENGINEERING
             if mode == 'gift':
-                # ════════════════════════════════════════════════════════
-                # 🎁 GIFT MODE: THE EXACT PROMPT INTEGRATION
-                # ════════════════════════════════════════════════════════
-                
-                # Extract variables with defaults to prevent crashes
-                recipient = ctx.get('recipient', 'Friend')
+                # 🎁 GIFT MODE PROMPT (Your Exact Logic)
+                recipient = ctx.get('recipient', 'Someone')
                 occasion = ctx.get('occasion', 'Special Occasion')
-                unspoken = ctx.get('unspoken', 'No specific message provided.')
+                unspoken = ctx.get('unspoken', '')
                 
                 core_expr = identity.get('coreExpression', 'Balanced')
                 presence = identity.get('presence', 'Thoughtful')
@@ -118,7 +114,6 @@ RESPONSE FORMAT (Strict JSON)
 
 {{
   "direction": "A 1-2 sentence creative brief explaining the emotional direction you chose and WHY these slogans work for this specific gift-giver → recipient → occasion combination.",
-  
   "slogans": [
     "First slogan (your strongest recommendation)",
     "Second slogan (alternative angle)",
@@ -126,66 +121,29 @@ RESPONSE FORMAT (Strict JSON)
     "Fourth slogan (slightly bolder/edgier)",
     "Fifth slogan (wildcard — unexpected but perfect)"
   ],
-  
   "suggestions": [
     "One specific design/styling tip",
     "One tip about the emotional context",
     "One tip about personalization"
-  ],
-  
-  "recommended_style": "One of: 'Minimalist Premium' | 'Street Bold' | 'Poetic Soft' | 'Dark Luxe' | 'Clean Athletic' | 'Vintage Narrative'",
-  
-  "primary_color": "Hex color code matching emotional tone"
+  ]
 }}
-
-═══════════════════════════════════════════
-EXAMPLES OF QUALITY CALIBRATION
-═══════════════════════════════════════════
-
-❌ BAD (generic): "Stay Strong", "Best Friend Ever", "Love Wins"
-
-✅ GOOD (specific):
-- "Built Different, Loved Same" (motivation gift)
-- "Still Your Favorite Chapter" (anniversary)
-- "Soft Era, Hard Lessons" (breakup)
-- "You Were the Plot Twist" (first date)
-- "Raised by Wolves, Chosen by You" (family)
-- "Overthinking Looks Good on Me" (friend)
-
-Now generate for THIS specific combination. Make it personal. Make it matter.
 """
-            
             else:
-                # ════════════════════════════════════════════════════════
-                # 👤 SELF MODE: STANDARD STYLIST PROMPT
-                # ════════════════════════════════════════════════════════
-                
+                # 👤 SELF MODE PROMPT (Standard)
                 contexts = ", ".join(ctx.get('contexts', ['Daily Wear']))
                 loudness = ctx.get('loudness', 'Balanced')
-                
                 system_instruction = f"""
-                You are an elite fashion stylist for a user with this identity:
-                - Vibe: {identity.get('coreExpression')}
-                - Presence: {identity.get('presence')}
-                - Signal: {identity.get('signal')}
-                
-                MISSION:
-                They are dressing for: "{contexts}".
-                Loudness Level: {loudness} (Scale: Subtle = texture/cut, Statement = graphic/bold).
-                
-                TASK:
-                Translate their internal identity into a visual look for this specific context.
-                
-                OUTPUT JSON:
-                {{
-                    "direction": "A single, poetic sentence defining the vibe.",
-                    "suggestions": ["Visual detail 1", "Visual detail 2", "Visual detail 3", "Visual detail 4"]
-                }}
+                You are an elite fashion stylist.
+                User Identity: {identity.get('coreExpression')}
+                Context: {contexts}
+                Loudness: {loudness}
+                Task: Suggest 4 visual details and 1 vibe direction.
+                Output JSON: {{ "direction": "...", "suggestions": ["...", "...", "...", "..."] }}
                 """
 
-            # 5. CALL OPENAI
+            # 5. GENERATE
             completion = client.chat.completions.create(
-                model="gpt-4o",  # Using 4o for best creativity on slogans
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": "Generate JSON response."}
@@ -194,39 +152,24 @@ Now generate for THIS specific combination. Make it personal. Make it matter.
                 temperature=0.85
             )
 
-            # 6. PROCESS RESPONSE
-            raw_content = completion.choices[0].message.content
-            data = json.loads(raw_content)
-            
-            # 7. MAP TO FRONTEND CONTRACT
-            # The frontend expects "suggestions" to be the list of items to display.
-            # In Gift Mode, we map "slogans" -> "suggestions".
+            # 6. RESPONSE MAPPING
+            data = json.loads(completion.choices[0].message.content)
             
             response_payload = {}
-            
             if mode == 'gift':
+                # Map 'slogans' to 'suggestions' for frontend compatibility
                 response_payload = {
-                    "direction": data.get("direction", "A thoughtful selection."),
-                    "suggestions": data.get("slogans", []), # Crucial Mapping for Frontend
-                    "styling_tips": data.get("suggestions", []), # Preserve original design tips
-                    "recommended_style": data.get("recommended_style", "Modern"),
-                    "primary_color": data.get("primary_color", "#000000")
+                    "direction": data.get("direction", "Curated for you."),
+                    "suggestions": data.get("slogans", []), 
+                    "styling_tips": data.get("suggestions", [])
                 }
             else:
-                # Self mode structure matches default
                 response_payload = data
 
-            # 8. SEND RESPONSE
             self.wfile.write(json.dumps(response_payload).encode('utf-8'))
 
         except Exception as e:
-            # Fallback error response
-            error_response = json.dumps({
-                "direction": "We encountered a creative block. Let's try again.",
-                "suggestions": ["Error: " + str(e)], 
-                "error": str(e)
-            })
-            self.wfile.write(error_response.encode('utf-8'))
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
     def do_OPTIONS(self):
         self.send_response(200)
