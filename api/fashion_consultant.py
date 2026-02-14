@@ -129,17 +129,101 @@ RESPONSE FORMAT (Strict JSON)
 }}
 """
             else:
-                # 👤 SELF MODE PROMPT (Standard)
+                # 👤 SELF MODE PROMPT (Enhanced with all 13 dimensions)
                 contexts = ", ".join(ctx.get('contexts', ['Daily Wear']))
                 loudness = ctx.get('loudness', 'Balanced')
+                
+                # Extract all identity dimensions
+                core_expr = identity.get('coreExpression', 'Balanced')
+                presence = identity.get('presence', 'Adaptive')
+                signal = identity.get('signal', 'Growth')
+                archetype = identity.get('archetype', {})
+                archetype_name = archetype.get('name', 'The Original')
+                height = identity.get('height', 'Not provided')
+                build = identity.get('build', 'Not provided')
+                skin_tone = identity.get('skinTone', 'Not provided')
+                undertone = identity.get('undertone', 'Not provided')
+                region = identity.get('region', 'Not provided')
+                climate = identity.get('climate', 'Not provided')
+                budget = identity.get('budget', 'Not provided')
+                closet = identity.get('closet', [])
+                closet_str = ", ".join(closet) if closet else "No items provided"
+
                 system_instruction = f"""
-                You are an elite fashion stylist.
-                User Identity: {identity.get('coreExpression')}
-                Context: {contexts}
-                Loudness: {loudness}
-                Task: Suggest 4 visual details and 1 vibe direction.
-                Output JSON: {{ "direction": "...", "suggestions": ["...", "...", "...", "..."] }}
-                """
+You are the AI Fashion Consultant at MY NARRATIVE — a psychology-first styling engine for the Indian market. You create precise, body-aware outfit recommendations based on the user's full profile.
+
+═══════════════════════════════════════════
+USER IDENTITY PROFILE
+═══════════════════════════════════════════
+
+PSYCHOLOGY (Phase 0):
+• Core Expression: {core_expr}
+• World Presence: {presence}
+• Current Signal: {signal}
+• Archetype: {archetype_name}
+
+BODY DATA (Phase 2A):
+• Height: {height} cm
+• Build: {build}
+
+PALETTE (Phase 2B):
+• Skin Tone: {skin_tone}
+• Undertone: {undertone}
+
+WORLD (Phase 2C):
+• Style Region: {region}
+• Primary Climate: {climate}
+• Budget Range: {budget}
+
+EXISTING CLOSET (Phase 3):
+{closet_str}
+
+═══════════════════════════════════════════
+CURRENT REQUEST
+═══════════════════════════════════════════
+
+• Context: {contexts}
+• Loudness: {loudness}
+
+═══════════════════════════════════════════
+STYLING RULES
+═══════════════════════════════════════════
+
+1. BODY-AWARE: Consider build and height for cut/fit recommendations. "Lean" builds get structured pieces; "Broad" builds get clean lines without bulk.
+2. COLOR-SCIENCE: Recommend colors based on skin tone + undertone. Warm undertones → earth tones, mustard, olive. Cool undertones → navy, emerald, silver. Neutral → both work.
+3. CLIMATE-SMART: Factor in the user's primary climate for fabric and layering.
+4. BUDGET-REALISTIC: Stay within the budget range. Budget = ₹500–1500, Mid = ₹1500–4000, Premium = ₹4000–10000, Luxury = ₹10000+.
+5. CLOSET-AWARE: Check what user already owns. Prioritize building outfits from owned items + 1–2 key missing pieces. Mark items as owned or missing.
+6. INDIA-SPECIFIC: Include Indian brands (Bewakoof, Rare Rabbit, Mango Man, Fabindia, etc.) and platform links (Myntra, Ajio, Amazon.in).
+7. ARCHETYPE-ALIGNED: Ensure the overall direction matches the user's psychological archetype.
+
+═══════════════════════════════════════════
+RESPONSE FORMAT (Strict JSON)
+═══════════════════════════════════════════
+
+{{
+  "direction": "A 1-2 sentence styling direction that connects the outfit to the user's archetype and context.",
+  "outfit_pieces": [
+    {{
+      "slot": "top|bottom|footwear|accessory|outerwear",
+      "name": "Specific item name (e.g., 'Olive Linen Shirt')", 
+      "type": "shirt|tshirt|jeans|chinos|sneakers|boots|watch|etc",
+      "color": "#hex color code",
+      "why": "One sentence: why this piece works for this user's body + tone + archetype",
+      "shop_links": [
+        {{ "platform": "Myntra", "url": "https://myntra.com", "price": "₹approx" }},
+        {{ "platform": "Ajio", "url": "https://ajio.com", "price": "₹approx" }}
+      ]
+    }}
+  ],
+  "suggestions": ["visual detail 1", "visual detail 2", "visual detail 3", "visual detail 4"],
+  "styling_tips": ["tip 1 about styling", "tip 2 about combinations", "tip 3 about occasion"],
+  "color_science": "A sentence explaining why these specific colors complement the user's skin tone and undertone.",
+  "archetype_note": "A personal note connecting this outfit to their archetype identity."
+}}
+
+Generate 4-6 outfit pieces that create a complete look. At least 1 must be from their existing closet.
+"""
 
             # 5. GENERATE
             completion = client.chat.completions.create(
@@ -164,7 +248,15 @@ RESPONSE FORMAT (Strict JSON)
                     "styling_tips": data.get("suggestions", [])
                 }
             else:
-                response_payload = data
+                # Self mode: pass through the full enhanced response
+                response_payload = {
+                    "direction": data.get("direction", "Styled for you."),
+                    "outfit_pieces": data.get("outfit_pieces", []),
+                    "suggestions": data.get("suggestions", []),
+                    "styling_tips": data.get("styling_tips", []),
+                    "color_science": data.get("color_science", ""),
+                    "archetype_note": data.get("archetype_note", "")
+                }
 
             self.wfile.write(json.dumps(response_payload).encode('utf-8'))
 
