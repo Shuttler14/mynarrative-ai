@@ -4,19 +4,29 @@ import os
 import replicate
 
 class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
+    def do_OPTIONS(self):
+        # Handle CORS preflight request
         self.send_response(200)
-        self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', '86400')
         self.end_headers()
 
+    def do_POST(self):
         try:
             # 1. Auth Check
-            token = os.environ.get("REPLICATE_API_TOKEN")
+            token = os.environ.get("REPLICATE_API_TOKEN") or os.getenv("REPLICATE_API_TOKEN")
             if not token:
-                raise ValueError("Server Config Error: Missing Replicate Token")
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False, 
+                    "error": "Server Config Error: Missing REPLICATE_API_TOKEN environment variable"
+                }).encode('utf-8'))
+                return
             
             client = replicate.Client(api_token=token)
             
@@ -76,16 +86,17 @@ class handler(BaseHTTPRequestHandler):
                 )
                 output_url = output[0] # Flux returns a list
 
-            # 3. Response
+            # 3. Success Response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
             self.wfile.write(json.dumps({"success": True, "image": output_url}).encode('utf-8'))
 
         except Exception as e:
-            # Production Logging would go here
+            # Error Response with proper headers
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
             self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
