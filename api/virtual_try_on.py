@@ -46,9 +46,22 @@ class handler(BaseHTTPRequestHandler):
                 garm_img = body.get('garment_image')   # URL from Shopify CDN
                 category = body.get('category', 'upper_body') 
                 
-                # Using IDM-VTON model (exact version from official example)
+                print("👕 Fetching latest IDM-VTON version...")
+                
+                # --- AUTO-FETCH LOGIC (FIX FOR MODEL VERSION ERROR) ---
+                try:
+                    model = client.models.get("cuuupid/idm-vton")
+                    latest_version = model.latest_version
+                    version_id = latest_version.id
+                    print(f"✅ Using IDM-VTON Version: {version_id}")
+                except Exception as e:
+                    # Fallback to known working hash if auto-fetch fails
+                    print(f"⚠️ Auto-fetch failed, using fallback. Error: {e}")
+                    version_id = "c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4"
+
+                # Run Prediction
                 output = client.run(
-                    "cuuupid/idm-vton:c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4",
+                    f"cuuupid/idm-vton:{version_id}",
                     input={
                         "human_img": human_img,
                         "garm_img": garm_img,
@@ -56,11 +69,13 @@ class handler(BaseHTTPRequestHandler):
                         "category": category,
                         "crop": False,
                         "seed": 42,
-                        "steps": 30
+                        "steps": 30,
+                        "force_dc": False,
+                        "mask_only": False
                     }
                 )
-                # IDM-VTON returns a FileOutput object with .url() method
-                # But the Python SDK automatically converts it to string when accessed
+                
+                # IDM-VTON returns a FileOutput object
                 output_url = str(output) if hasattr(output, '__str__') else output
 
             # ---------------------------------------------------------
