@@ -48,7 +48,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 # Using IDM-VTON model (exact version from official example)
                 output = client.run(
-                    "cuuupid/idm-vton:0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985",
+                    "cuuupid/idm-vton:c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4",
                     input={
                         "human_img": human_img,
                         "garm_img": garm_img,
