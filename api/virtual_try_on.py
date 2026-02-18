@@ -78,6 +78,7 @@ class handler(BaseHTTPRequestHandler):
                     context = body.get('context', 'studio lighting')
                     prompt = f"A photorealistic full-body shot of an Indian {gender} with {skin} skin tone, wearing {outfit}. Background is {context}. Cinematic lighting, 4k, texture rich, fashion photography."
 
+                # 1. GENERATE BASE IMAGE WITH FLUX
                 output = client.run(
                     "black-forest-labs/flux-schnell",
                     input={
@@ -86,7 +87,23 @@ class handler(BaseHTTPRequestHandler):
                         "num_inference_steps": 4 # Speed optimized
                     }
                 )
-                output_url = output[0] # Flux returns a list
+                generated_image_url = output[0] # Flux returns a list
+
+                # 2. OPTIONAL: FACE SWAP
+                user_face = body.get('user_image')
+                if user_face:
+                    # Run Face Swap (chained prediction)
+                    # Using lucataco/faceswap (based on InsightFace)
+                    swap_output = client.run(
+                        "lucataco/faceswap:9a4298548422074c3f57258c5d544497314ae4112df80d116f0d2109bd068e9c",
+                        input={
+                            "target_image": generated_image_url,
+                            "swap_image": user_face
+                        }
+                    )
+                    output_url = str(swap_output)
+                else:
+                    output_url = generated_image_url
 
             # 3. Success Response
             self.send_response(200)
