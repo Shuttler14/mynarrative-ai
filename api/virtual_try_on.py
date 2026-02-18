@@ -46,9 +46,10 @@ class handler(BaseHTTPRequestHandler):
                 garm_img = body.get('garment_image')   # URL from Shopify CDN
                 category = body.get('category', 'upper_body') 
                 
-                # Using IDM-VTON model
+                # Using IDM-VTON model (latest version)
+                # Alternative: Try viton-hd if this doesn't work
                 output = client.run(
-                    "cuuupid/idm-vton:c871bb9b046607e580c22118d58d01d4ce893999830f6e61e6d262172740922e",
+                    "cuuupid/idm-vton",  # Using latest version automatically
                     input={
                         "human_img": human_img,
                         "garm_img": garm_img,
