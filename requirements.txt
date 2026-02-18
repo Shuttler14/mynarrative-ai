@@ -3,3 +3,4 @@ openai
 Pillow
 requests
 replicate==0.25.1
+supabase
