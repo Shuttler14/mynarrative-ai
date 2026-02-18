@@ -46,10 +46,9 @@ class handler(BaseHTTPRequestHandler):
                 garm_img = body.get('garment_image')   # URL from Shopify CDN
                 category = body.get('category', 'upper_body') 
                 
-                # Using IDM-VTON model (latest version)
-                # Alternative: Try viton-hd if this doesn't work
+                # Using IDM-VTON model (exact version from official example)
                 output = client.run(
-                    "cuuupid/idm-vton",  # Using latest version automatically
+                    "cuuupid/idm-vton:0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985",
                     input={
                         "human_img": human_img,
                         "garm_img": garm_img,
@@ -60,7 +59,9 @@ class handler(BaseHTTPRequestHandler):
                         "steps": 30
                     }
                 )
-                output_url = output # IDM-VTON returns a string URL
+                # IDM-VTON returns a FileOutput object with .url() method
+                # But the Python SDK automatically converts it to string when accessed
+                output_url = str(output) if hasattr(output, '__str__') else output
 
             # ---------------------------------------------------------
             # MODE B: FANTASY VISUALIZATION (Consultant - FLUX)
