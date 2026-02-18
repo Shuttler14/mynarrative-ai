@@ -94,8 +94,26 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"success": True, "image": output_url}).encode('utf-8'))
 
+        except replicate.exceptions.ReplicateError as e:
+            # Replicate-specific error handling
+            error_msg = str(e)
+            status_code = 500
+            
+            # Check for specific error types
+            if hasattr(e, 'status'):
+                if e.status == 402:
+                    error_msg = '💳 REPLICATE CREDITS EXHAUSTED\n\nPlease add credits at:\nhttps://replicate.com/account/billing\n\nAfter purchasing, wait 2-3 minutes before trying again.'
+                elif e.status == 422:
+                    error_msg = '⚠️ MODEL VERSION ERROR\n\nThe AI model version is invalid or you don\'t have permission.\nPlease contact support.'
+            
+            self.send_response(status_code)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": False, "error": error_msg}).encode('utf-8'))
+            
         except Exception as e:
-            # Error Response with proper headers
+            # Generic error handling
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
