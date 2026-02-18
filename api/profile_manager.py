@@ -114,11 +114,44 @@ class handler(BaseHTTPRequestHandler):
                 # Get Public URL
                 image_url = supabase.storage.from_("closet").get_public_url(file_name)
                 
-                # Get metadata from request or use defaults
-                category = body.get('category', 'general')
-                color = body.get('color', 'unknown')
-                tags = body.get('tags', [])
+                # --- GPT-4o CLASSIFICATION ---
+                category = 'general'
+                color = 'unknown'
+                tags = []
                 
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+                    
+                    print(f"🤖 Analyzing image with GPT-4o...")
+                    completion = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Analyze this clothing item. Return a JSON object with keys: 'category' (e.g. Tops, Bottoms, Footwear, Accessories), 'color' (dominant color name), and 'tags' (array of 3-5 descriptive keywords like style, material, pattern)."},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
+                                ]
+                            }
+                        ],
+                        response_format={"type": "json_object"},
+                        max_tokens=300
+                    )
+                    
+                    analysis = json.loads(completion.choices[0].message.content)
+                    category = analysis.get('category', 'general')
+                    color = analysis.get('color', 'unknown')
+                    tags = analysis.get('tags', [])
+                    print(f"✅ GPT-4o Analysis: {analysis}")
+                    
+                except Exception as gpt_error:
+                    print(f"⚠️ GPT-4o Analysis Failed: {gpt_error}")
+                    # Fallback to manual input if provided, or defaults
+                    category = body.get('category', 'general')
+                    color = body.get('color', 'unknown')
+                    tags = body.get('tags', [])
+
                 # Save Metadata to DB
                 item_data = {
                     "id": item_id,
