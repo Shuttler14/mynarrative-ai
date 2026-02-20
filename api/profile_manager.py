@@ -37,7 +37,7 @@ class handler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(content_length).decode('utf-8'))
             
-            action = body.get('action')  # 'save_twin' or 'add_item' or 'get_twin' or 'get_closet'
+            action = body.get('action')  # 'save_twin', 'add_item', 'get_twin', 'get_closet', 'delete_item'
             user_id = body.get('user_id')  # Shopify Customer ID
             image_data = body.get('image')  # Base64 string
 
@@ -51,27 +51,20 @@ class handler(BaseHTTPRequestHandler):
                 if not image_data:
                     raise ValueError("image data is required")
 
-                # Convert base64 to bytes if needed
                 if image_data.startswith('data:image'):
-                    # Remove data:image/...;base64, prefix
                     image_data = image_data.split(',')[1]
                 
                 image_bytes = base64.b64decode(image_data)
-                
-                # Upload to Supabase Storage bucket 'digital-twins'
                 file_path = f"{user_id}/master_photo.png"
                 
-                # Upload with upsert (replace if exists)
-                upload_result = supabase.storage.from_("digital-twins").upload(
+                supabase.storage.from_("digital-twins").upload(
                     file_path, 
                     image_bytes,
                     {"content-type": "image/png", "upsert": "true"}
                 )
                 
-                # Get Public URL
                 public_url = supabase.storage.from_("digital-twins").get_public_url(file_path)
                 
-                # Update User Profile DB
                 supabase.table("profiles").upsert({
                     "id": user_id, 
                     "twin_photo_url": public_url,
@@ -94,27 +87,26 @@ class handler(BaseHTTPRequestHandler):
                 if not image_data:
                     raise ValueError("image data is required")
 
-                # Convert base64 to bytes
+                # Extract exact mime_type for OpenAI and clean base64 data for Supabase
+                mime_type = "image/jpeg"
                 if image_data.startswith('data:image'):
+                    mime_type = image_data.split(';')[0].split(':')[1]
                     image_data = image_data.split(',')[1]
                 
                 image_bytes = base64.b64decode(image_data)
                 
-                # Generate unique filename
                 item_id = str(uuid.uuid4())
                 file_name = f"{user_id}/{item_id}.png"
                 
-                # Upload to Supabase Storage 'closet'
+                # Upload to Supabase Storage
                 supabase.storage.from_("closet").upload(
                     file_name,
                     image_bytes,
                     {"content-type": "image/png"}
                 )
-                
-                # Get Public URL
                 image_url = supabase.storage.from_("closet").get_public_url(file_name)
                 
-                # --- GPT-4o CLASSIFICATION ---
+                # --- GPT-4o-mini CLASSIFICATION ---
                 category = 'general'
                 color = 'unknown'
                 tags = []
@@ -123,15 +115,15 @@ class handler(BaseHTTPRequestHandler):
                     from openai import OpenAI
                     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
                     
-                    print(f"🤖 Analyzing image with GPT-4o...")
+                    print(f"🤖 Analyzing image with GPT-4o-mini...")
                     completion = client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-4o-mini", # FIXED: Switched to the unlocked, faster model
                         messages=[
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": "Analyze this clothing item. Return a JSON object with keys: 'category' (e.g. Tops, Bottoms, Footwear, Accessories), 'color' (dominant color name), and 'tags' (array of 3-5 descriptive keywords like style, material, pattern)."},
-                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
+                                    {"type": "text", "text": "Analyze this clothing item. Return ONLY a JSON object with keys: 'category' (e.g. Tops, Bottoms, Footwear, Accessories), 'color' (dominant color name), and 'tags' (array of 3-5 descriptive keywords like style, material, pattern)."},
+                                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
                                 ]
                             }
                         ],
@@ -143,11 +135,10 @@ class handler(BaseHTTPRequestHandler):
                     category = analysis.get('category', 'general')
                     color = analysis.get('color', 'unknown')
                     tags = analysis.get('tags', [])
-                    print(f"✅ GPT-4o Analysis: {analysis}")
+                    print(f"✅ AI Analysis Success: {analysis}")
                     
                 except Exception as gpt_error:
-                    print(f"⚠️ GPT-4o Analysis Failed: {gpt_error}")
-                    # Fallback to manual input if provided, or defaults
+                    print(f"⚠️ AI Analysis Failed: {gpt_error}")
                     category = body.get('category', 'general')
                     color = body.get('color', 'unknown')
                     tags = body.get('tags', [])
@@ -169,7 +160,6 @@ class handler(BaseHTTPRequestHandler):
             elif action == 'get_closet':
                 # Retrieve all closet items for user
                 result = supabase.table("closet_items").select("*").eq("user_id", user_id).execute()
-                
                 response = {"success": True, "items": result.data or []}
 
             elif action == 'delete_item':
@@ -178,15 +168,11 @@ class handler(BaseHTTPRequestHandler):
                 if not item_id:
                     raise ValueError("item_id is required")
                 
-                # Get item to find image path
                 item = supabase.table("closet_items").select("*").eq("id", item_id).eq("user_id", user_id).execute()
                 
                 if item.data and len(item.data) > 0:
-                    # Delete from storage
                     file_path = f"{user_id}/{item_id}.png"
                     supabase.storage.from_("closet").remove([file_path])
-                    
-                    # Delete from DB
                     supabase.table("closet_items").delete().eq("id", item_id).execute()
                     
                     response = {"success": True}
@@ -204,9 +190,8 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode('utf-8'))
 
         except Exception as e:
-            # Enhanced error handling
             error_msg = str(e)
-            print(f"Error in profile_manager: {error_msg}")
+            print(f"❌ Error in profile_manager: {error_msg}")
             
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
