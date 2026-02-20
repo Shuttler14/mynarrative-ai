@@ -116,22 +116,49 @@ class handler(BaseHTTPRequestHandler):
                     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
                     
                     print(f"🤖 Analyzing image with GPT-4o-mini...")
+                    
+                    prompt = """You are an expert Indian fashion stylist. 
+                    Analyze this clothing item and return a JSON object.
+                    DO NOT use markdown formatting, backticks, or the word 'json'.
+                    Return exactly and only this structure:
+                    {
+                      "category": "String (e.g., Kurta, Shirt, Jeans, Saree, Lehenga, Footwear, Accessories)",
+                      "color": "String (dominant color)",
+                      "tags": ["String", "String", "String"]
+                    }"""
+
                     completion = client.chat.completions.create(
-                        model="gpt-4o-mini", # FIXED: Switched to the unlocked, faster model
+                        model="gpt-4o-mini",
                         messages=[
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": "Analyze this clothing item. Return ONLY a JSON object with keys: 'category' (e.g. Tops, Bottoms, Footwear, Accessories), 'color' (dominant color name), and 'tags' (array of 3-5 descriptive keywords like style, material, pattern)."},
-                                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url", 
+                                        "image_url": {
+                                            "url": f"data:{mime_type};base64,{image_data}",
+                                            "detail": "high"
+                                        }
+                                    }
                                 ]
                             }
                         ],
                         response_format={"type": "json_object"},
+                        temperature=0.3,
                         max_tokens=300
                     )
                     
-                    analysis = json.loads(completion.choices[0].message.content)
+                    ai_text = completion.choices[0].message.content.strip()
+                    
+                    # Extract JSON payload to avoid markdown crash
+                    if "```" in ai_text:
+                        start = ai_text.find('{')
+                        end = ai_text.rfind('}') + 1
+                        if start != -1 and end != 0:
+                            ai_text = ai_text[start:end]
+
+                    analysis = json.loads(ai_text)
                     category = analysis.get('category', 'general')
                     color = analysis.get('color', 'unknown')
                     tags = analysis.get('tags', [])
