@@ -146,8 +146,47 @@ RESPONSE FORMAT (Strict JSON)
                 region = identity.get('region', 'Not provided')
                 climate = identity.get('climate', 'Not provided')
                 budget = identity.get('budget', 'Not provided')
-                closet = identity.get('closet', [])
-                closet_str = ", ".join(closet) if closet else "No items provided"
+                # Use rich digital_closet (from AI cloth detection) if available, else fallback to simple closet list
+                digital_closet = identity.get('digital_closet', [])
+                simple_closet = identity.get('closet', [])
+
+                if digital_closet:
+                    # Format rich closet items into a detailed, GPT-readable block
+                    closet_lines = []
+                    for i, item in enumerate(digital_closet, 1):
+                        name = item.get('original_name') or item.get('name', 'Unknown item')
+                        color = item.get('color', '')
+                        fabric = item.get('fabric', '')
+                        fit = item.get('fit', '')
+                        pattern = item.get('pattern', '')
+                        section = item.get('closet_section', '')
+                        occasion = item.get('occasion', '')
+                        season = item.get('season', '')
+                        tags = ', '.join(item.get('style_tags', [])) if item.get('style_tags') else ''
+                        item_id = item.get('item_id', f'item_{i}')
+
+                        descriptor_parts = [p for p in [color, pattern, fabric, fit + ' fit' if fit else ''] if p]
+                        descriptor = ' '.join(descriptor_parts)
+
+                        line = f"  [{item_id}] {name}"
+                        if descriptor:
+                            line += f" — {descriptor}"
+                        if section:
+                            line += f" ({section})"
+                        if occasion:
+                            line += f" | Best for: {occasion}"
+                        if season:
+                            line += f" | Season: {season}"
+                        if tags:
+                            line += f" | Tags: {tags}"
+                        closet_lines.append(line)
+
+                    closet_str = "\n".join(closet_lines)
+                    closet_str += f"\n\n  Total: {len(digital_closet)} items detected by AI from uploaded photos."
+                elif simple_closet:
+                    closet_str = ", ".join(simple_closet)
+                else:
+                    closet_str = "No closet items provided yet."
 
                 system_instruction = f"""
 You are the AI Fashion Consultant at MY NARRATIVE — a psychology-first styling engine for the Indian market. You create precise, body-aware outfit recommendations based on the user's full profile.
@@ -193,7 +232,7 @@ STYLING RULES
 2. COLOR-SCIENCE: Recommend colors based on skin tone + undertone. Warm undertones → earth tones, mustard, olive. Cool undertones → navy, emerald, silver. Neutral → both work.
 3. CLIMATE-SMART: Factor in the user's primary climate for fabric and layering.
 4. BUDGET-REALISTIC: Stay within the budget range. Budget = ₹500–1500, Mid = ₹1500–4000, Premium = ₹4000–10000, Luxury = ₹10000+.
-5. CLOSET-AWARE: Check what user already owns. Prioritize building outfits from owned items + 1–2 key missing pieces. Mark items as owned or missing.
+5. CLOSET-AWARE: The user's AI-detected closet is listed above with item IDs in [brackets]. Prioritize building outfits around items they ALREADY OWN. For each outfit piece, if it matches something in their closet, set "owned": true and "item_id" to the matching ID. For new pieces to buy, set "owned": false. Always lead with at least 1–2 owned items to minimise spend.
 6. INDIA-SPECIFIC: Include Indian brands (Bewakoof, Rare Rabbit, Mango Man, Fabindia, etc.) and platform links (Myntra, Ajio, Amazon.in).
 7. ARCHETYPE-ALIGNED: Ensure the overall direction matches the user's psychological archetype.
 
@@ -206,10 +245,12 @@ RESPONSE FORMAT (Strict JSON)
   "outfit_pieces": [
     {{
       "slot": "top|bottom|footwear|accessory|outerwear",
-      "name": "Specific item name (e.g., 'Olive Linen Shirt')", 
+      "name": "Specific item name (e.g., 'Olive Linen Shirt')",
       "type": "shirt|tshirt|jeans|chinos|sneakers|boots|watch|etc",
       "color": "#hex color code",
-      "why": "One sentence: why this piece works for this user's body + tone + archetype",
+      "owned": true,
+      "item_id": "matching item_id from closet if owned, else null",
+      "why": "One sentence: why this piece works for this user's body + tone + archetype. If owned, start with 'You already own this —'",
       "shop_links": [
         {{ "platform": "Myntra", "url": "https://myntra.com", "price": "₹approx" }},
         {{ "platform": "Ajio", "url": "https://ajio.com", "price": "₹approx" }}
@@ -222,7 +263,7 @@ RESPONSE FORMAT (Strict JSON)
   "archetype_note": "A personal note connecting this outfit to their archetype identity."
 }}
 
-Generate 4-6 outfit pieces that create a complete look. At least 1 must be from their existing closet.
+Generate 4-6 outfit pieces that create a complete look. At least 1-2 must be items the user ALREADY OWNS (owned: true). For owned items, do NOT include shop_links (they already have it). For new items to buy, include shop_links with real Indian platform URLs and approximate prices.
 """
 
             # 5. GENERATE
