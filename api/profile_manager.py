@@ -120,10 +120,13 @@ class handler(BaseHTTPRequestHandler):
                     prompt = """You are an expert Indian fashion stylist. 
                     Analyze this clothing item and return a JSON object.
                     DO NOT use markdown formatting, backticks, or the word 'json'.
+                    
+                    CRITICAL INSTRUCTION: If the image is blurry, empty, or you cannot detect clothing, DO NOT output conversational text or error messages like "Could not detect clothing". You MUST STILL return the JSON structure below using "Unknown" for the values.
+                    
                     Return exactly and only this structure:
                     {
-                      "category": "String (e.g., Kurta, Shirt, Jeans, Saree, Lehenga, Footwear, Accessories)",
-                      "color": "String (dominant color)",
+                      "category": "String (e.g., Kurta, Shirt, Jeans, Saree, Lehenga, Footwear, Accessories, or Unknown)",
+                      "color": "String (dominant color or Unknown)",
                       "tags": ["String", "String", "String"]
                     }"""
 
