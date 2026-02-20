@@ -1,15 +1,9 @@
 """
-Cloth Detection API - Vercel Serverless Function
-=================================================
-Detects clothing items from uploaded images using GPT-4o-mini vision.
-Designed for the MY NARRATIVE AI Stylist on Shopify.
-
-Accepts:
-  POST with JSON body: { "image": "<base64_data_url>" }
-  OR:                  { "image_url": "<https://...>" }
-
-Returns:
-  JSON: { success, detected_items, summary, count, sections }
+Cloth Detection API - Vercel Serverless Function (Enhanced)
+===========================================================
+Production-grade clothing detection ported from enhanced_cloth_detector.py.
+Features: Name normalization, Indian fashion taxonomy, occasion/season detection,
+style tags, deduplication, item_id, rich prompt (fit, fabric, gender, sub_category).
 """
 
 from http.server import BaseHTTPRequestHandler
@@ -17,6 +11,7 @@ import json
 import os
 import base64
 import re
+import uuid
 
 try:
     from openai import OpenAI
@@ -25,339 +20,578 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Indian Fashion Detection Prompt
+# INDIAN FASHION TAXONOMY
 # ---------------------------------------------------------------------------
 
-DETECTION_PROMPT = """You are an expert Indian fashion stylist and clothing classifier.
-Analyze the provided image and detect ALL visible clothing items worn by the person.
+INDIAN_FASHION_TAXONOMY = {
+    "T-Shirt":       {"category": "Topwear",    "style": "Western",    "sub_category": "crew neck"},
+    "Shirt":         {"category": "Topwear",    "style": "Western",    "sub_category": "casual shirt"},
+    "Hoodie":        {"category": "Topwear",    "style": "Western",    "sub_category": "pullover"},
+    "Blouse":        {"category": "Topwear",    "style": "Western",    "sub_category": "crop top"},
+    "Jeans":         {"category": "Bottomwear", "style": "Western",    "sub_category": "slim"},
+    "Trousers":      {"category": "Bottomwear", "style": "Western",    "sub_category": "formal"},
+    "Shorts":        {"category": "Bottomwear", "style": "Western",    "sub_category": "casual"},
+    "Skirt":         {"category": "Bottomwear", "style": "Western",    "sub_category": "midi"},
+    "Kurta":         {"category": "Topwear",    "style": "Ethnic",     "sub_category": "straight cut"},
+    "Kurti":         {"category": "Topwear",    "style": "Ethnic",     "sub_category": "short"},
+    "Sherwani":      {"category": "Topwear",    "style": "Ethnic",     "sub_category": "bandhgala"},
+    "Nehru Jacket":  {"category": "Topwear",    "style": "Ethnic",     "sub_category": "classic"},
+    "Angavastram":   {"category": "Topwear",    "style": "Ethnic",     "sub_category": "drape"},
+    "Dhoti":         {"category": "Bottomwear", "style": "Ethnic",     "sub_category": "traditional"},
+    "Lungi":         {"category": "Bottomwear", "style": "Ethnic",     "sub_category": "cotton"},
+    "Palazzo":       {"category": "Bottomwear", "style": "Ethnic",     "sub_category": "wide leg"},
+    "Leggings":      {"category": "Bottomwear", "style": "Ethnic",     "sub_category": "churidar"},
+    "Saree":         {"category": "Dress",      "style": "Ethnic",     "sub_category": "cotton"},
+    "Lehenga":       {"category": "Dress",      "style": "Ethnic",     "sub_category": "party"},
+    "Salwar Kameez": {"category": "Dress",      "style": "Ethnic",     "sub_category": "straight"},
+    "Jacket":        {"category": "Outerwear",  "style": "Western",    "sub_category": "denim"},
+    "Blazer":        {"category": "Outerwear",  "style": "Formal",     "sub_category": "single breasted"},
+    "Coat":          {"category": "Outerwear",  "style": "Western",    "sub_category": "wool"},
+    "Dupatta":       {"category": "Accessory",  "style": "Ethnic",     "sub_category": "chiffon"},
+    "Scarf":         {"category": "Accessory",  "style": "Western",    "sub_category": "silk"},
+    "Mojaris":       {"category": "Footwear",   "style": "Ethnic",     "sub_category": "embroidered"},
+    "Juttis":        {"category": "Footwear",   "style": "Ethnic",     "sub_category": "Punjabi"},
+    "Kolhapuris":    {"category": "Footwear",   "style": "Ethnic",     "sub_category": "leather"},
+    "Footwear":      {"category": "Footwear",   "style": "Western",    "sub_category": ""},
+    "Dress":         {"category": "Dress",      "style": "Western",    "sub_category": "midi"},
+    "Jewellery":     {"category": "Accessory",  "style": "Ethnic",     "sub_category": ""},
+    "Watch":         {"category": "Accessory",  "style": "Western",    "sub_category": ""},
+    "Bag":           {"category": "Accessory",  "style": "Western",    "sub_category": ""},
+    "Headwear":      {"category": "Accessory",  "style": "Western",    "sub_category": ""},
+    "Accessories":   {"category": "Accessory",  "style": "Western",    "sub_category": ""},
+}
 
-For each clothing item detected, provide:
-1. name        - The exact name of the garment (e.g. "Kurta", "Slim Fit Jeans", "Lehenga")
-2. confidence  - Your confidence level (0.0 to 1.0)
-3. closet_section - Which digital closet section it belongs to (see list below)
-4. description - Brief description of the item
-5. color       - Primary color if visible (or null)
-6. pattern     - Any pattern: solid, striped, floral, embroidered, printed, etc. (or null)
-7. material    - Fabric/material if identifiable: cotton, silk, denim, etc. (or null)
-8. style       - Style variant: Western, Ethnic, Fusion (or null)
-9. region      - Which region of India this is commonly from: North/South/East/West/All India (or null)
 
-CLASSIFY INTO THESE CLOSET SECTIONS:
-- Kurta (includes Kurti, Anarkali, Angavastram, Pathani, Achkan)
-- Shirt (formal shirts, casual shirts, oxford shirts)
-- T-Shirt (tshirts, tops, polos, blouses)
-- Jeans (jeans, denim trousers)
-- Trousers (pants, formal trousers, chinos, cargo pants)
-- Palazzo (palazzo pants, wide-leg pants)
+# ---------------------------------------------------------------------------
+# NAME NORMALIZATION (regex -> standard name)
+# ---------------------------------------------------------------------------
+
+NAME_NORMALIZATION = [
+    (r"\btee\b",                    "T-Shirt"),
+    (r"\btshirt\b",                 "T-Shirt"),
+    (r"\bpolo\s*shirt\b",           "T-Shirt"),
+    (r"\btop\b(?!\s+wear)",         "T-Shirt"),
+    (r"\bdenim(s)?\b",              "Jeans"),
+    (r"\bdenim\s*jeans\b",          "Jeans"),
+    (r"\bpants?\b",                 "Trousers"),
+    (r"\bformal\s*pants\b",         "Trousers"),
+    (r"\bcargo\s*pants\b",          "Trousers"),
+    (r"\bchinos?\b",                "Trousers"),
+    (r"\bkurti\b",                  "Kurta"),
+    (r"\bkurta\s*set\b",            "Kurta"),
+    (r"\banarkali\b",               "Kurta"),
+    (r"\bpathani\b",                "Kurta"),
+    (r"\bangavastram\b",            "Angavastram"),
+    (r"\bsari\b",                   "Saree"),
+    (r"\b drape\b",                 "Saree"),
+    (r"\bsalwar\s*kameez\b",        "Salwar Kameez"),
+    (r"\bsalwar\b",                 "Salwar Kameez"),
+    (r"\bsandals?\b",               "Footwear"),
+    (r"\bshoes?\b",                 "Footwear"),
+    (r"\bsneakers?\b",              "Footwear"),
+    (r"\bboots?\b",                 "Footwear"),
+    (r"\bheels?\b",                 "Footwear"),
+    (r"\bmojaris?\b",               "Mojaris"),
+    (r"\bjuttis?\b",                "Juttis"),
+    (r"\bkolhapuris?\b",            "Kolhapuris"),
+    (r"\bdupatta\b",                "Dupatta"),
+    (r"\bodhni\b",                  "Dupatta"),
+    (r"\bstole\b",                  "Scarf"),
+    (r"\bshawl\b",                  "Scarf"),
+    (r"\bpashmina\b",               "Scarf"),
+    (r"\bnehru\s*jacket\b",         "Nehru Jacket"),
+    (r"\bwaistcoat\b",              "Nehru Jacket"),
+    (r"\bghagra\b",                 "Lehenga"),
+    (r"\bcholi\b",                  "Lehenga"),
+    (r"\blungi\b",                  "Lungi"),
+    (r"\bmundu\b",                  "Lungi"),
+    (r"\bjhumka\b",                 "Jewellery"),
+    (r"\bbangles?\b",               "Jewellery"),
+    (r"\bnecklace\b",               "Jewellery"),
+    (r"\bearrings?\b",              "Jewellery"),
+    (r"\bring\b",                   "Jewellery"),
+    (r"\bbracelet\b",               "Jewellery"),
+    (r"\bmaang\s*tikka\b",          "Jewellery"),
+    (r"\bturban\b",                 "Headwear"),
+    (r"\bcap\b",                    "Headwear"),
+    (r"\bhat\b",                    "Headwear"),
+    (r"\bhandbag\b",                "Bag"),
+    (r"\bclutch\b",                 "Bag"),
+    (r"\bbackpack\b",               "Bag"),
+    (r"\btote\b",                   "Bag"),
+    (r"\bpurse\b",                  "Bag"),
+    (r"\bbelt\b",                   "Accessories"),
+    (r"\bsunglasses?\b",            "Accessories"),
+    (r"\btie\b",                    "Accessories"),
+]
+
+
+# ---------------------------------------------------------------------------
+# OCCASION KEYWORDS
+# ---------------------------------------------------------------------------
+
+OCCASION_KEYWORDS = {
+    "Festive":   ["festival", "festive", "wedding", "ceremony", "pooja", "diwali", "holi", "bridal", "reception"],
+    "Formal":    ["formal", "office", "business", "professional", "meeting", "suit"],
+    "Party":     ["party", "night", "club", "celebration", "cocktail", "evening"],
+    "Workwear":  ["office", "work", "professional", "corporate"],
+    "Sports":    ["gym", "workout", "sports", "exercise", "running", "athleisure", "jogger"],
+    "Beach":     ["beach", "vacation", "swim", "pool", "summer"],
+    "Casual":    ["casual", "everyday", "relaxed", "simple", "basic", "daily"],
+}
+
+
+# ---------------------------------------------------------------------------
+# SEASON KEYWORDS
+# ---------------------------------------------------------------------------
+
+SEASON_KEYWORDS = {
+    "Summer":     ["summer", "hot", "lightweight", "cotton", "linen", "breezy"],
+    "Winter":     ["winter", "cold", "wool", "warm", "heavy", "knitted", "fleece", "thermal"],
+    "Monsoon":    ["rain", "monsoon", "waterproof", "quick dry"],
+    "Festive":    ["festival", "wedding", "silk", "embroidery", "zari", "brocade"],
+}
+
+
+# ---------------------------------------------------------------------------
+# DETECTION PROMPT (enhanced — matches enhanced_cloth_detector.py quality)
+# ---------------------------------------------------------------------------
+
+DETECTION_PROMPT = """You are a fashion vision expert trained in global and Indian clothing styles.
+
+Analyze the uploaded image and extract ALL clothing items worn by the person(s).
+
+For EACH detected clothing item, return these fields:
+1. name          - Precise garment name, including color/fit descriptor (e.g. "Black Oversized T-Shirt", "Navy Slim Fit Jeans", "Ivory Silk Kurta")
+2. confidence    - Your confidence level 0.0-1.0
+3. closet_section - Closet section from the list below
+4. category      - Topwear / Bottomwear / Dress / Outerwear / Footwear / Accessory
+5. description   - One sentence describing the item in detail
+6. color         - Primary color (e.g. "Navy Blue", "Ivory White", "Mustard Yellow") or null
+7. pattern       - solid / printed / embroidered / striped / floral / checked / geometric / tie-dye / bandhani / block-printed / null
+8. fabric        - cotton / silk / denim / linen / chiffon / georgette / velvet / polyester / wool / khadi / null
+9. fit           - slim / regular / loose / oversized / relaxed / tailored / flared / null
+10. gender       - Men / Women / Unisex
+11. style        - Western / Ethnic / Fusion / Athleisure / Formal
+
+CLOSET SECTIONS (classify each item into exactly one):
+- Kurta (Kurti, Anarkali, Angavastram, Pathani, Achkan)
+- Shirt (formal, casual, oxford, chambray shirts)
+- T-Shirt (tees, tops, polos, blouses, tank tops)
+- Jeans (denim jeans, all cuts)
+- Trousers (pants, chinos, formal trousers, cargo pants)
+- Palazzo (wide-leg pants, palazzo trousers)
 - Leggings (churidar, salwar, leggings, tights)
 - Dhoti
 - Lungap (Lungi, Mundu)
 - Sherwani
-- Nehru Jacket
-- Blazer (blazers, coats, suit jackets)
-- Jacket (casual jackets, denim jackets, bomber jackets, hoodies)
+- Nehru Jacket (waistcoat, bandhgala jacket)
+- Blazer (blazers, suit jackets, coats)
+- Jacket (casual jackets, denim jackets, bomber jackets, hoodies, sweatshirts)
 - Saree
-- Lehenga (includes Choli, Ghagra, Skirt)
-- Chunni (Dupatta, Odhni, stoles worn as head/shoulder covering)
-- Scarf (scarves, stoles worn decoratively, shawls, pashmina)
-- Dress (gowns, frocks, western dresses, jumpsuits)
-- Footwear (shoes, sandals, slippers, sneakers, boots, heels, juttis, mojaris, kolhapuris)
-- Accessories (belts, sunglasses, ties, pocket squares)
-- Bag (handbags, clutches, wallets, backpacks, tote bags)
+- Lehenga (Choli, Ghagra, bridal skirts)
+- Chunni (Dupatta, Odhni as head/shoulder drape)
+- Scarf (decorative stoles, shawls, pashmina, mufflers)
+- Dress (western dresses, gowns, frocks, jumpsuits, co-ord sets)
+- Footwear (shoes, sandals, sneakers, boots, heels, juttis, mojaris, kolhapuris, bellies)
+- Accessories (belts, sunglasses, ties, pocket squares, watches listed separately)
+- Bag (handbags, clutches, backpacks, tote bags, wallets)
 - Watch
-- Jewellery (bangles, jhumkas, necklaces, earrings, rings, bracelets, maang tikka)
-- Headwear (hats, caps, turbans, dupattas on head)
-- Topwear (any upper body garment not fitting above categories)
-- Bottomwear (any lower body garment not fitting above categories)
+- Jewellery (bangles, jhumkas, necklaces, earrings, rings, maang tikka, bracelets, nose rings)
+- Headwear (hats, caps, turbans, pagdis)
+- Topwear (any upper-body garment not in above categories)
+- Bottomwear (any lower-body garment not in above categories)
 
-IMPORTANT RULES:
-- Detect ALL items visible — including multiple layers (shirt + jacket = 2 items)
-- Recognize both Indian ethnic wear AND western wear
-- Do NOT hallucinate items that are not clearly visible
-- Be specific and precise with Indian fashion terminology
-- Include footwear and accessories if they are visible in the frame
-- If the image does not contain a person or any clothing, return an empty array []
-- Return ONLY a valid JSON array — no markdown, no code blocks, no explanations
+CRITICAL RULES:
+- Detect EVERY visible item — shirt under jacket = 2 separate items
+- Be specific: "Embroidered Red Silk Kurta" NOT just "Kurta"
+- Include accessories, footwear, jewellery if visible
+- Do NOT hallucinate items not clearly visible
+- Return ONLY a valid raw JSON array — no markdown, no ```json, no explanations
 
-Return format — a JSON array only:
+Return format:
 [
   {
-    "name": "string",
-    "confidence": 0.0,
-    "closet_section": "string",
-    "description": "string",
-    "color": "string or null",
-    "pattern": "string or null",
-    "material": "string or null",
-    "style": "string or null",
-    "region": "string or null"
+    "name": "Black Oversized T-Shirt",
+    "confidence": 0.94,
+    "closet_section": "T-Shirt",
+    "category": "Topwear",
+    "description": "A relaxed-fit black crew neck t-shirt with minimal design.",
+    "color": "Black",
+    "pattern": "Solid",
+    "fabric": "Cotton",
+    "fit": "Oversized",
+    "gender": "Unisex",
+    "style": "Western"
   }
 ]"""
 
 
 # ---------------------------------------------------------------------------
-# Helper: Parse GPT response into list of items
+# NAME NORMALIZATION
+# ---------------------------------------------------------------------------
+
+def normalize_name(name: str) -> str:
+    name_lower = name.lower().strip()
+    for pattern, replacement in NAME_NORMALIZATION:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return replacement
+    return name.title()
+
+
+# ---------------------------------------------------------------------------
+# OCCASION DETECTION
+# ---------------------------------------------------------------------------
+
+def detect_occasion(name: str, description: str, fabric: str) -> str:
+    text = f"{name} {description} {fabric}".lower()
+    for occasion, keywords in OCCASION_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            return occasion
+    return "Casual"
+
+
+# ---------------------------------------------------------------------------
+# SEASON DETECTION
+# ---------------------------------------------------------------------------
+
+def detect_season(name: str, fabric: str, description: str) -> str:
+    text = f"{name} {fabric} {description}".lower()
+    for season, keywords in SEASON_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            return season
+    return "All Season"
+
+
+# ---------------------------------------------------------------------------
+# STYLE TAGS GENERATION
+# ---------------------------------------------------------------------------
+
+def generate_style_tags(item: dict) -> list:
+    tags = []
+    pattern = (item.get("pattern") or "").lower()
+    fit = (item.get("fit") or "").lower()
+    style = (item.get("style") or "").lower()
+    fabric = (item.get("fabric") or "").lower()
+
+    if "printed" in pattern:   tags.append("Printed")
+    if "embroidered" in pattern: tags.append("Embroidered")
+    if "solid" in pattern:     tags.append("Solid Color")
+    if "striped" in pattern:   tags.append("Striped")
+    if "floral" in pattern:    tags.append("Floral")
+    if "bandhani" in pattern:  tags.append("Bandhani")
+    if "block" in pattern:     tags.append("Block Print")
+    if "checked" in pattern:   tags.append("Checked")
+
+    if "oversized" in fit:     tags.append("Oversized")
+    if "slim" in fit:          tags.append("Slim Fit")
+    if "loose" in fit:         tags.append("Loose Fit")
+    if "regular" in fit:       tags.append("Regular Fit")
+    if "flared" in fit:        tags.append("Flared")
+    if "tailored" in fit:      tags.append("Tailored")
+
+    if "ethnic" in style:      tags.append("Ethnic Chic")
+    if "fusion" in style:      tags.append("Fusion")
+    if "western" in style:     tags.append("Western")
+    if "formal" in style:      tags.append("Formal Wear")
+    if "athleisure" in style:  tags.append("Athleisure")
+
+    if "silk" in fabric:       tags.append("Silk")
+    if "denim" in fabric:      tags.append("Denim")
+    if "khadi" in fabric:      tags.append("Khadi")
+
+    return tags[:6]
+
+
+# ---------------------------------------------------------------------------
+# DEDUPLICATION (name similarity check)
+# ---------------------------------------------------------------------------
+
+def names_similar(n1: str, n2: str) -> bool:
+    a = n1.lower().strip()
+    b = n2.lower().strip()
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+    words_a = set(a.split())
+    words_b = set(b.split())
+    overlap = words_a & words_b
+    if len(overlap) >= min(len(words_a), len(words_b)) * 0.5:
+        return True
+    return False
+
+
+def deduplicate(items: list) -> list:
+    unique = []
+    for item in items:
+        is_dup = False
+        for existing in unique:
+            if names_similar(item["name"], existing["name"]):
+                if item["confidence"] > existing["confidence"]:
+                    unique.remove(existing)
+                    unique.append(item)
+                is_dup = True
+                break
+        if not is_dup:
+            unique.append(item)
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# PARSE GPT RESPONSE
 # ---------------------------------------------------------------------------
 
 def parse_detection_response(response_text: str) -> list:
-    """Extract and parse JSON array from GPT response."""
-    # Strip markdown code blocks if present
     text = response_text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text)
     text = re.sub(r'\s*```$', '', text)
     text = text.strip()
 
-    # Find JSON array bounds
     start = text.find('[')
     end = text.rfind(']')
-
     if start == -1 or end == -1:
         return []
 
-    json_str = text[start:end + 1]
-    items = json.loads(json_str)
-
-    # Validate and normalise each item
+    items = json.loads(text[start:end + 1])
     validated = []
+
     for item in items:
         if not isinstance(item, dict):
             continue
-        name = item.get('name', '').strip()
-        if not name:
+        raw_name = item.get('name', '').strip()
+        if not raw_name:
             continue
-        # Clamp confidence between 0 and 1
-        raw_conf = item.get('confidence', 0.7)
+
+        # Normalize name
+        normalized_name = normalize_name(raw_name)
+
+        # Clamp confidence — use 0.5 default (never drop items silently)
         try:
-            confidence = max(0.0, min(1.0, float(raw_conf)))
+            confidence = max(0.0, min(1.0, float(item.get('confidence', 0.7))))
         except (TypeError, ValueError):
             confidence = 0.7
 
+        # Get taxonomy info
+        tax = INDIAN_FASHION_TAXONOMY.get(normalized_name, {})
+        category = item.get('category') or tax.get('category', 'Unknown')
+        sub_category = tax.get('sub_category', '')
+        style = item.get('style') or tax.get('style', 'Western')
+
+        fabric = item.get('fabric') or None
+        fit = item.get('fit') or None
+        description = item.get('description', '') or ''
+        color = item.get('color') or None
+        pattern = item.get('pattern') or None
+        gender = item.get('gender') or 'Unisex'
+
+        # Enrichment
+        occasion = detect_occasion(normalized_name, description, fabric or '')
+        season = detect_season(normalized_name, fabric or '', description)
+        style_tags = generate_style_tags({
+            'pattern': pattern, 'fit': fit, 'style': style, 'fabric': fabric
+        })
+
+        # closet_section: trust GPT if valid, else fall back to taxonomy category
+        closet_section = item.get('closet_section', '') or category
+
         validated.append({
-            'name': name,
-            'confidence': confidence,
-            'closet_section': item.get('closet_section', 'Unknown') or 'Unknown',
-            'description': item.get('description', '') or '',
-            'color': item.get('color') or None,
-            'pattern': item.get('pattern') or None,
-            'material': item.get('material') or None,
-            'style': item.get('style') or None,
-            'region': item.get('region') or None,
+            'item_id':       str(uuid.uuid4())[:8],
+            'name':          normalized_name,
+            'original_name': raw_name,
+            'confidence':    confidence,
+            'closet_section': closet_section,
+            'category':      category,
+            'sub_category':  sub_category,
+            'description':   description,
+            'color':         color,
+            'pattern':       pattern,
+            'fabric':        fabric,
+            'fit':           fit,
+            'gender':        gender,
+            'style':         style,
+            'occasion':      occasion,
+            'season':        season,
+            'style_tags':    style_tags,
         })
 
     return validated
 
 
 # ---------------------------------------------------------------------------
-# Helper: Generate human-readable summary
+# GENERATE SUMMARY
 # ---------------------------------------------------------------------------
 
 def generate_summary(items: list) -> str:
-    """Generate a concise summary of detected clothing items."""
     if not items:
         return "No clothing items detected."
 
-    topwear_sections = {"Kurta", "Shirt", "T-Shirt", "Sherwani", "Nehru Jacket",
-                        "Blazer", "Jacket", "Topwear", "Dress"}
-    bottomwear_sections = {"Jeans", "Trousers", "Palazzo", "Leggings",
-                           "Dhoti", "Lungap", "Bottomwear", "Lehenga"}
-    accessory_sections = {"Accessories", "Bag", "Watch", "Jewellery",
-                          "Headwear", "Scarf", "Chunni", "Saree"}
+    by_category = {}
+    for item in items:
+        cat = item.get('category', 'Unknown')
+        by_category.setdefault(cat, []).append(item)
 
     parts = []
-    tops = [i for i in items if i['closet_section'] in topwear_sections]
-    bottoms = [i for i in items if i['closet_section'] in bottomwear_sections]
-    footwear = [i for i in items if i['closet_section'] == 'Footwear']
-    accessories = [i for i in items if i['closet_section'] in accessory_sections]
+    for cat in ['Topwear', 'Bottomwear', 'Dress', 'Outerwear', 'Footwear', 'Accessory']:
+        cat_items = by_category.get(cat, [])
+        if cat_items:
+            names = [i['name'] + (f" ({i['color']})" if i.get('color') else '') for i in cat_items]
+            parts.append(f"{cat}: {', '.join(names)}")
 
-    def fmt(item):
-        return item['name'] + (f" ({item['color']})" if item.get('color') else "")
-
-    if tops:
-        parts.append("Top: " + ", ".join(fmt(i) for i in tops))
-    if bottoms:
-        parts.append("Bottom: " + ", ".join(fmt(i) for i in bottoms))
-    if footwear:
-        parts.append("Footwear: " + ", ".join(i['name'] for i in footwear))
-    if accessories:
-        parts.append("Accessories: " + ", ".join(i['name'] for i in accessories))
-
-    return " | ".join(parts) if parts else f"{len(items)} clothing item(s) detected."
+    return ' | '.join(parts) if parts else f"{len(items)} clothing item(s) detected."
 
 
 # ---------------------------------------------------------------------------
-# Helper: Count items by closet section
+# COUNT SECTIONS
 # ---------------------------------------------------------------------------
 
 def count_sections(items: list) -> dict:
     counts = {}
     for item in items:
-        section = item.get('closet_section', 'Unknown')
-        counts[section] = counts.get(section, 0) + 1
+        s = item.get('closet_section', 'Unknown')
+        counts[s] = counts.get(s, 0) + 1
     return counts
 
 
 # ---------------------------------------------------------------------------
-# Helper: Detect MIME type from base64 data URL
+# MIME TYPE HELPER
 # ---------------------------------------------------------------------------
 
 def get_mime_type(data_url: str) -> str:
-    """Extract MIME type from a data URL, defaulting to image/jpeg."""
     match = re.match(r'data:([^;]+);base64,', data_url)
-    if match:
-        return match.group(1)
-    return 'image/jpeg'
+    return match.group(1) if match else 'image/jpeg'
 
 
 # ---------------------------------------------------------------------------
-# Vercel Serverless Handler
+# VERCEL SERVERLESS HANDLER
 # ---------------------------------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
-        """Handle CORS preflight."""
         self.send_response(200)
         self._send_cors_headers()
         self.end_headers()
 
     def do_POST(self):
-        """Main cloth detection endpoint."""
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self._send_cors_headers()
         self.end_headers()
 
         try:
-            # ── 1. Validate OpenAI client ──────────────────────────────────
+            # 1. Validate API key
             api_key = os.environ.get('OPENAI_API_KEY')
             if not api_key:
-                self._write_error('Server configuration error: OPENAI_API_KEY not set.', 500)
+                self._write_error('Server configuration error: OPENAI_API_KEY not set.')
                 return
-
             if OpenAI is None:
-                self._write_error('Server dependency error: openai package not installed.', 500)
+                self._write_error('Server dependency error: openai package not installed.')
                 return
 
             client = OpenAI(api_key=api_key)
 
-            # ── 2. Parse request body ──────────────────────────────────────
+            # 2. Parse body
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length == 0:
-                self._write_error('Empty request body.', 400)
+                self._write_error('Empty request body.')
                 return
+            body = json.loads(self.rfile.read(content_length))
 
-            raw_body = self.rfile.read(content_length)
-            body = json.loads(raw_body)
-
-            # ── 3. Build image content for OpenAI ─────────────────────────
+            # 3. Build image content
             image_content = None
 
             if 'image' in body:
-                # Base64 data URL from browser FileReader
                 data_url = body['image']
-
                 if not data_url:
-                    self._write_error('image field is empty.', 400)
+                    self._write_error('image field is empty.')
                     return
-
-                # Handle both raw base64 and full data URLs
                 if data_url.startswith('data:'):
                     mime_type = get_mime_type(data_url)
-                    # Strip the data URL header to get pure base64
                     b64_data = data_url.split(',', 1)[1] if ',' in data_url else data_url
                 else:
-                    # Assume raw base64, default mime
                     mime_type = 'image/jpeg'
                     b64_data = data_url
-
-                # Validate it's actually base64
                 try:
                     base64.b64decode(b64_data, validate=True)
                 except Exception:
-                    self._write_error('Invalid base64 image data.', 400)
+                    self._write_error('Invalid base64 image data.')
                     return
-
                 image_content = {
                     'type': 'image_url',
-                    'image_url': {
-                        'url': f'data:{mime_type};base64,{b64_data}',
-                        'detail': 'high'
-                    }
+                    'image_url': {'url': f'data:{mime_type};base64,{b64_data}', 'detail': 'high'}
                 }
 
             elif 'image_url' in body:
-                # Direct URL to an image
                 image_url = body['image_url']
                 if not image_url or not image_url.startswith('http'):
-                    self._write_error('Invalid image_url.', 400)
+                    self._write_error('Invalid image_url.')
                     return
-
                 image_content = {
                     'type': 'image_url',
-                    'image_url': {
-                        'url': image_url,
-                        'detail': 'high'
-                    }
+                    'image_url': {'url': image_url, 'detail': 'high'}
                 }
 
             else:
-                self._write_error(
-                    'Request must include either "image" (base64 data URL) or "image_url" (https URL).',
-                    400
-                )
+                self._write_error('Request must include "image" (base64) or "image_url".')
                 return
 
-            # ── 4. Call GPT-4o-mini Vision ─────────────────────────────────
+            # 4. Call GPT-4o-mini with enhanced prompt
             response = client.chat.completions.create(
                 model='gpt-4o-mini',
-                messages=[
-                    {
-                        'role': 'user',
-                        'content': [
-                            {'type': 'text', 'text': DETECTION_PROMPT},
-                            image_content
-                        ]
-                    }
-                ],
-                max_tokens=2000,
-                temperature=0.2   # Low temp for consistent, factual classification
+                messages=[{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': DETECTION_PROMPT},
+                        image_content
+                    ]
+                }],
+                max_tokens=3000,
+                temperature=0.2
             )
 
             raw_content = response.choices[0].message.content
 
-            # ── 5. Parse response ──────────────────────────────────────────
+            # 5. Parse + normalize + enrich
             detected_items = parse_detection_response(raw_content)
 
+            # 6. Deduplicate
+            detected_items = deduplicate(detected_items)
+
+            # 7. Sort: highest confidence first
+            detected_items.sort(key=lambda x: x['confidence'], reverse=True)
+
             if not detected_items:
-                # GPT returned empty array — no clothing detected
                 self._write_json({
                     'success': True,
                     'detected_items': [],
                     'summary': 'No clothing items detected. Please try a clearer photo with better lighting.',
                     'count': 0,
-                    'sections': {}
+                    'sections': {},
+                    'categories': {}
                 })
                 return
 
-            # ── 6. Build response ──────────────────────────────────────────
             summary = generate_summary(detected_items)
             sections = count_sections(detected_items)
+            categories = {}
+            for item in detected_items:
+                cat = item.get('category', 'Unknown')
+                categories[cat] = categories.get(cat, 0) + 1
 
             self._write_json({
                 'success': True,
                 'detected_items': detected_items,
                 'summary': summary,
                 'count': len(detected_items),
-                'sections': sections
+                'sections': sections,
+                'categories': categories
             })
 
         except json.JSONDecodeError as e:
-            self._write_error(f'Invalid JSON in request: {e}', 400)
+            self._write_error(f'Invalid JSON in request: {e}')
         except Exception as e:
-            # Surface the real error message for debugging
-            self._write_error(f'Detection failed: {str(e)}', 500)
-
-    # ── Private helpers ────────────────────────────────────────────────────
+            self._write_error(f'Detection failed: {str(e)}')
 
     def _send_cors_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -367,9 +601,7 @@ class handler(BaseHTTPRequestHandler):
     def _write_json(self, data: dict):
         self.wfile.write(json.dumps(data).encode('utf-8'))
 
-    def _write_error(self, message: str, status_code: int = 500):
-        # We already sent 200 in do_POST before reading the body,
-        # so we just return an error payload in the body.
+    def _write_error(self, message: str):
         self.wfile.write(json.dumps({
             'success': False,
             'error': message,
@@ -379,5 +611,4 @@ class handler(BaseHTTPRequestHandler):
         }).encode('utf-8'))
 
     def log_message(self, format, *args):
-        # Suppress default HTTP server logging on Vercel
         pass
