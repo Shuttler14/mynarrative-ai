@@ -1,9 +1,29 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
-import replicate
+
+try:
+    import replicate
+    REPLICATE_AVAILABLE = True
+except ImportError:
+    REPLICATE_AVAILABLE = False
 
 class handler(BaseHTTPRequestHandler):
+
+    def _error(self, status, message):
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps({"success": False, "error": message}).encode('utf-8'))
+
+    def _success(self, data):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode('utf-8'))
+
     def do_OPTIONS(self):
         # Handle CORS preflight request
         self.send_response(200)
@@ -16,18 +36,15 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             # 1. Auth Check
+            if not REPLICATE_AVAILABLE:
+                self._error(500, "Server Config Error: replicate package not installed. Run: pip install replicate")
+                return
+
             token = os.environ.get("REPLICATE_API_TOKEN") or os.getenv("REPLICATE_API_TOKEN")
             if not token:
-                self.send_response(500)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    "success": False, 
-                    "error": "Server Config Error: Missing REPLICATE_API_TOKEN environment variable"
-                }).encode('utf-8'))
+                self._error(500, "REPLICATE_API_TOKEN is not set in Vercel environment variables. Please add it at: Vercel Dashboard → Your Project → Settings → Environment Variables → Add REPLICATE_API_TOKEN")
                 return
-            
+
             client = replicate.Client(api_token=token)
             
             # 2. Parse Request
@@ -121,34 +138,15 @@ class handler(BaseHTTPRequestHandler):
                     output_url = generated_image_url
 
             # 3. Success Response
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": True, "image": output_url}).encode('utf-8'))
+            self._success({"success": True, "image": output_url})
 
-        except replicate.exceptions.ReplicateError as e:
-            # Replicate-specific error handling
-            error_msg = str(e)
-            status_code = 500
-            
-            # Check for specific error types
-            if hasattr(e, 'status'):
-                if e.status == 402:
-                    error_msg = '💳 REPLICATE CREDITS EXHAUSTED\n\nPlease add credits at:\nhttps://replicate.com/account/billing\n\nAfter purchasing, wait 2-3 minutes before trying again.'
-                elif e.status == 422:
-                    error_msg = '⚠️ MODEL VERSION ERROR\n\nThe AI model version is invalid or you don\'t have permission.\nPlease contact support.'
-            
-            self.send_response(status_code)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": False, "error": error_msg}).encode('utf-8'))
-            
         except Exception as e:
-            # Generic error handling
-            self.send_response(500)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+            error_msg = str(e)
+            # Check for Replicate-specific errors by message content
+            if '402' in error_msg or 'payment' in error_msg.lower() or 'credit' in error_msg.lower():
+                error_msg = '💳 Replicate credits exhausted. Add credits at replicate.com/account/billing'
+            elif '422' in error_msg or 'version' in error_msg.lower():
+                error_msg = '⚠️ AI model version error. Please contact support.'
+            elif '401' in error_msg or 'unauthorized' in error_msg.lower() or 'token' in error_msg.lower():
+                error_msg = '🔑 Invalid REPLICATE_API_TOKEN. Please check your Vercel environment variables.'
+            self._error(500, error_msg)
