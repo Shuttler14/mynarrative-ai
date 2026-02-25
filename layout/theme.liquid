@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>
+    {{ page_title }}
+      {%- if current_tags %} &ndash; tagged "{{ current_tags | join: ', ' }}"{% endif -%}
+      {%- if current_page != 1 %} &ndash; Page {{ current_page }}{% endif -%}
+      {%- unless page_title contains shop.name %} &ndash; {{ shop.name }}{% endunless -%}
+  </title>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <meta name="description" content="{{ page_description | escape }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <link rel="shortcut icon" href="{{ settings.favicon |  image_url: width: 50  }}" type="image/x-icon">
+  <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+
+  {% comment %} ========================================== {% endcomment %}
+  {% comment %}       PERFORMANCE OPTIMIZATION PACK        {% endcomment %}
+  {% comment %} ========================================== {% endcomment %}
+
+  <link rel="preconnect" href="https://cdn.shopify.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.shopifycdn.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="dns-prefetch" href="https://v.shopify.com">
+
+  <script type="speculationrules">
+  {
+    "prerender": [
+      {
+        "source": "document",
+        "where": {
+          "and": [
+            { "href_matches": "/*" },
+            { "selector_matches": ".product-card a, .street-card a, .story-trigger" }
+          ]
+        },
+        "eagerness": "conservative"
+      }
+    ]
+  }
+  </script>
+
+  {% comment %} ========================================== {% endcomment %}
+  
+  {{ content_for_header }} 
+
+  {% comment %} ========================================== {% endcomment %}
+  {% comment %}         SAFE PERFORMANCE LOADING           {% endcomment %}
+  {% comment %} ========================================== {% endcomment %}
+
+  <link rel="preload" href="{{ 'application.css' | asset_url }}" as="style">
+  <link rel="preload" href="{{ 'output.css' | asset_url }}" as="style">
+
+  {{ 'application.css' | asset_url | stylesheet_tag }}
+  {{ 'output.css' | asset_url | stylesheet_tag }}
+
+  {% comment %} 
+    FIX: Load Swiper on BOTH Homepage and Product Page.
+    (Required for Homepage sliders AND Product Page thumbnails)
+  {% endcomment %}
+  {% if template == 'index' or template == 'product' %}
+    {{ 'swiper.css' | asset_url | stylesheet_tag }}
+    <script src="{{ 'swiper.js' | asset_url }}" defer></script>
+  {% endif %}
+
+  {% comment %} Homepage Specific Scripts (Keep these only on Home) {% endcomment %}
+  {% if template == 'index' %}
+    <script src="{{ 'announcement-slider.js' | asset_url }}" defer></script>
+    <script src="{{ 'product-slider.js' | asset_url }}" defer></script>
+  {% endif %}
+
+  {% if template.name == 'collection' or template.name == 'search' %}
+    {{ 'collection.css' | asset_url | stylesheet_tag }}
+    <script src="{{ "collection.js" | asset_url }}" defer ></script>
+  {% endif %}
+
+  {% if request.path == '/pages/wishlist' %}
+    <script src="{{ "wishlist.js" | asset_url }}" defer ></script>
+  {% endif %}
+
+  {% if request.path contains 'collab' %}
+    {{ 'collab.css' | asset_url | stylesheet_tag }}
+  {% endif %}
+
+  <script src="{{ "application.js" | asset_url }}" defer ></script>
+  
+  {% comment %} 3D Avatar Visualizer - Load as ES Module {% endcomment %}
+  <!-- 3D Visualizer removed - now using FLUX for AI-generated previews -->
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" media="print" onload="this.media='all'">
+  
+  {% comment %} Analytics - Defer content square to not block LCP {% endcomment %}
+  <script src="https://t.contentsquare.net/uxa/cb9033d27c6d3.js" defer></script>
+</head>
+
+<body>
+  {% render 'preloader-narrative' %}
+  <main role="main" class="bg-black text-white">
+    {% sections 'header-group' %}
+    {{ content_for_layout }}
+    {% section 'footer' %}
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      
+      // 1. Check Login Status
+      const isUserLoggedIn = {% if customer %}true{% else %}false{% endif %};
+
+      // 2. Select all wishlist buttons
+      const wishlistButtons = document.querySelectorAll('[data-for="product-card-wishlist"]');
+
+      // 3. Load saved items
+      const savedWishlist = JSON.parse(localStorage.getItem('wishlist_items')) || [];
+
+      // 4. Initialize Buttons
+      wishlistButtons.forEach(btn => {
+        const handle = btn.getAttribute('data-product-handle');
+        if (savedWishlist.includes(handle)) {
+          btn.classList.add('active'); 
+        }
+
+        // 5. Click Listener
+        btn.addEventListener('click', (e) => {
+          if (!isUserLoggedIn) {
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            window.location.href = "/account/login";
+            return;
+          }
+
+          const handle = btn.getAttribute('data-product-handle');
+          let currentWishlist = JSON.parse(localStorage.getItem('wishlist_items')) || [];
+
+          if (currentWishlist.includes(handle)) {
+            currentWishlist = currentWishlist.filter(item => item !== handle);
+            btn.classList.remove('active'); 
+          } else {
+            currentWishlist.push(handle);
+            btn.classList.add('active'); 
+          }
+
+          localStorage.setItem('wishlist_items', JSON.stringify(currentWishlist));
+        });
+      });
+    });
+  </script>
+  <script>
+  // 1. REGISTER SERVICE WORKER
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register("{{ 'sw.js' | asset_url }}").then(reg => {
+        
+        // 2. WAIT 15 SECONDS (Network is completely idle)
+        setTimeout(() => {
+          scanAndCacheAssets(reg);
+        }, 15000); // <--- CHANGED FROM 4000 TO 15000
+        
+      });
+    });
+  }
+
+  function scanAndCacheAssets(registration) {
+    // Wait for the controller to be ready (handled by clients.claim in sw.js)
+    if (!navigator.serviceWorker.controller) return;
+
+    const urlsToCache = new Set(); 
+
+    // --- A. GET HERO SLIDER IMAGES ---
+    document.querySelectorAll('.swiper-slide img, .hero-banner img').forEach(img => {
+      if(img.currentSrc) urlsToCache.add(img.currentSrc);
+    });
+
+    // --- B. GET FIRST 8 STORIES ---
+    const stories = document.querySelectorAll('.story-ring img, .story-trigger img'); 
+    for (let i = 0; i < 8 && i < stories.length; i++) {
+      if(stories[i].currentSrc) urlsToCache.add(stories[i].currentSrc);
+    }
+
+    // --- C. GET FIRST PRODUCT OF TOP 10 SLIDERS ---
+    const sliders = document.querySelectorAll('.product-slider, .collection-slider');
+    for (let i = 0; i < 10 && i < sliders.length; i++) {
+      const firstProductImg = sliders[i].querySelector('img'); 
+      if (firstProductImg && firstProductImg.currentSrc) {
+        urlsToCache.add(firstProductImg.currentSrc);
+      }
+    }
+
+    // --- D. SEND TO SERVICE WORKER ---
+    if (urlsToCache.size > 0) {
+      console.log(`[Narrative Cache] T+15s: Precaching ${urlsToCache.size} assets.`);
+      navigator.serviceWorker.controller.postMessage({
+        action: 'CACHE_SPECIFIC_URLS',
+        urls: Array.from(urlsToCache)
+      });
+    }
+  }
+</script>
+  {% unless template contains 'product' or template == 'index' %}
+    {% section 'MN-fashion-consultant' %}
+  {% endunless %}
+</body>
+</html>

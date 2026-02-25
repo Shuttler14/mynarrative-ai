@@ -1,0 +1,123 @@
+/*
+ * ------------------------------------------------------------
+ * IMPORTANT: The contents of this file are auto-generated.
+ *
+ * This file may be updated by the Shopify admin theme editor
+ * or related systems. Please exercise caution as any changes
+ * made to this file may be overwritten.
+ * ------------------------------------------------------------
+ */
+{
+  "current": {
+    "navlogo": "shopify://shop_images/MN_LOGO_WHITE.svg",
+    "mobileNavlogo": "shopify://shop_images/MN_LOGO_WHITE.svg",
+    "footerLogo": "shopify://shop_images/MN_Logo_White_Transparent_BG.svg",
+    "favicon": "shopify://shop_images/MN_Favicon.png",
+    "instagram": "https://www.instagram.com/mynarrative.store/",
+    "facebook": "",
+    "linkedin": "https://www.linkedin.com/",
+    "twitter": "https://x.com/",
+    "sections": {
+      "navbar": {
+        "type": "navbar",
+        "settings": {
+          "menuLinks": "main-menu"
+        }
+      },
+      "footer": {
+        "type": "footer",
+        "blocks": {
+          "newslatter_mHDFdL": {
+            "type": "newslatter",
+            "settings": {
+              "block_title": "Subscribe",
+              "block_text": "Subscribe to receive updates, access to exclusive deals, and more."
+            }
+          },
+          "company_EK4LtW": {
+            "type": "company",
+            "settings": {
+              "about_company": "Clothing Brand",
+              "show_company_logo": true,
+              "show_about_company": true,
+              "show_phone_number": true,
+              "show_email": true
+            }
+          },
+          "menu_gt94pL": {
+            "type": "menu",
+            "settings": {
+              "menu_links": "categories"
+            }
+          },
+          "menu_QrKteU": {
+            "type": "menu",
+            "settings": {
+              "menu_links": "company"
+            }
+          },
+          "menu_LeyUjT": {
+            "type": "menu",
+            "settings": {
+              "menu_links": "policies"
+            }
+          },
+          "social_GdrCrV": {
+            "type": "social",
+            "settings": {
+              "block_title": "Follow Us On"
+            }
+          }
+        },
+        "block_order": [
+          "newslatter_mHDFdL",
+          "company_EK4LtW",
+          "menu_gt94pL",
+          "menu_QrKteU",
+          "menu_LeyUjT",
+          "social_GdrCrV"
+        ],
+        "settings": {}
+      }
+    },
+    "content_for_index": [],
+    "blocks": {
+      "14060646107696862457": {
+        "type": "shopify://apps/judge-me-reviews/blocks/judgeme_core/61ccd3b1-a9f2-4160-9fe9-4fec8413e5d8",
+        "disabled": false,
+        "settings": {}
+      },
+      "5043070786800498925": {
+        "type": "shopify://apps/ecomsend-restock/blocks/bis-switch/b190bced-3b7b-47da-a05f-6ea4821c3a77",
+        "disabled": true,
+        "settings": {}
+      },
+      "9508235472506026167": {
+        "type": "shopify://apps/sg-notify-me-back-in-stock/blocks/notifyme-embed/149ed091-61ef-46c4-964d-eddbebe30e92",
+        "disabled": false,
+        "settings": {
+          "button_position": "right",
+          "side_button_text": "Notify Me!",
+          "side_button_color": "#ffffff",
+          "side_button_text_color": "#000000",
+          "heading": "Notify Me When Available",
+          "heading_color": "#000000",
+          "subheading": "Fill in the required details to get notified when the product is again in stock!",
+          "subheading_color": "#4a4a4a",
+          "email_input_placeholder_text": "Email",
+          "name_input_placeholder_text": "Name",
+          "button_text": "Notify Me",
+          "button_color": "#000000",
+          "button_text_color": "#ffffff",
+          "success_msg": "Thanks, We Will Notify You When Product Back In Stock!!",
+          "message_text_color": "#1fb3a7",
+          "side_class": "ptpl_sidebtn_look",
+          "ptpl_sideform": "ptpl_sideform_look"
+        }
+      }
+    }
+  },
+  "presets": {
+    "Default": {}
+  }
+}
