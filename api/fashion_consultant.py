@@ -257,7 +257,12 @@ RESPONSE FORMAT (Strict JSON)
       ]
     }}
   ],
-  "suggestions": ["visual detail 1", "visual detail 2", "visual detail 3", "visual detail 4"],
+  "suggestions": [
+    "Full body fashion photograph prompt 1: A complete head-to-toe editorial shot of an Indian {build} {gender} model with {skin_tone} skin tone wearing [outfit piece 1] and [outfit piece 2], full body visible from head to feet including footwear, no cropping, clean studio background, cinematic lighting",
+    "Full body fashion photograph prompt 2: Street-style full length photograph of the complete outfit look — entire figure visible top to bottom, high fashion editorial quality, Indian aesthetic",
+    "Full body fashion photograph prompt 3: An alternative angle or styling variation of the same complete outfit, full body shot, head to toe, professional fashion photography",
+    "Full body fashion photograph prompt 4: Close-up detail shot of the key statement piece from the outfit (this is the only non-full-body shot allowed)"
+  ],
   "styling_tips": ["tip 1 about styling", "tip 2 about combinations", "tip 3 about occasion"],
   "color_science": "A sentence explaining why these specific colors complement the user's skin tone and undertone.",
   "archetype_note": "A personal note connecting this outfit to their archetype identity."
