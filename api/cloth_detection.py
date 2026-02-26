@@ -159,7 +159,18 @@ SEASON_KEYWORDS = {
 
 DETECTION_PROMPT = """You are a fashion vision expert trained in global and Indian clothing styles.
 
-Analyze the uploaded image and extract ALL clothing items worn by the person(s).
+Analyze the uploaded image and do TWO things:
+
+━━━ PART 1: PERSON ANALYSIS ━━━
+Analyze the person in the photo and determine:
+- gender: "man" / "woman" / "person" (non-binary)
+- body_build: "lean" / "athletic" / "broad" / "slim" / "regular" / "heavy"
+- skin_tone: "fair" / "wheatish" / "medium" / "dusky" / "deep"
+- undertone: "warm" / "cool" / "neutral" (based on visible skin warmth/coolness)
+- jewelry_recommendations: Array of 3-5 jewelry types that would suit this person best based on their skin tone, build, and style. Each item should have: type (e.g. "Gold Chain", "Silver Bracelet"), reason (why it suits them), and metal ("gold" / "silver" / "rose_gold" / "oxidized")
+
+━━━ PART 2: CLOTHING DETECTION ━━━
+Extract ALL clothing items worn by the person(s).
 
 For EACH detected clothing item, return these fields:
 1. name          - Precise garment name, including color/fit descriptor (e.g. "Black Oversized T-Shirt", "Navy Slim Fit Jeans", "Ivory Silk Kurta")
@@ -207,24 +218,37 @@ CRITICAL RULES:
 - Be specific: "Embroidered Red Silk Kurta" NOT just "Kurta"
 - Include accessories, footwear, jewellery if visible
 - Do NOT hallucinate items not clearly visible
-- Return ONLY a valid raw JSON array — no markdown, no ```json, no explanations
+- Return ONLY a valid raw JSON object — no markdown, no ```json, no explanations
 
-Return format:
-[
-  {
-    "name": "Black Oversized T-Shirt",
-    "confidence": 0.94,
-    "closet_section": "T-Shirt",
-    "category": "Topwear",
-    "description": "A relaxed-fit black crew neck t-shirt with minimal design.",
-    "color": "Black",
-    "pattern": "Solid",
-    "fabric": "Cotton",
-    "fit": "Oversized",
-    "gender": "Unisex",
-    "style": "Western"
-  }
-]"""
+Return format (JSON object with person_analysis and detected_items):
+{
+  "person_analysis": {
+    "gender": "man",
+    "body_build": "athletic",
+    "skin_tone": "medium",
+    "undertone": "warm",
+    "jewelry_recommendations": [
+      { "type": "Gold Chain", "reason": "Warm undertone complements gold beautifully", "metal": "gold" },
+      { "type": "Leather Bracelet", "reason": "Matches the casual athletic build", "metal": "oxidized" },
+      { "type": "Analog Watch (Gold)", "reason": "Classic piece that elevates any outfit", "metal": "gold" }
+    ]
+  },
+  "detected_items": [
+    {
+      "name": "Black Oversized T-Shirt",
+      "confidence": 0.94,
+      "closet_section": "T-Shirt",
+      "category": "Topwear",
+      "description": "A relaxed-fit black crew neck t-shirt with minimal design.",
+      "color": "Black",
+      "pattern": "Solid",
+      "fabric": "Cotton",
+      "fit": "Oversized",
+      "gender": "Unisex",
+      "style": "Western"
+    }
+  ]
+}"""
 
 
 # ---------------------------------------------------------------------------
@@ -342,21 +366,45 @@ def deduplicate(items: list) -> list:
 # PARSE GPT RESPONSE
 # ---------------------------------------------------------------------------
 
-def parse_detection_response(response_text: str) -> list:
+def parse_detection_response(response_text: str):
+    """Parse GPT response. Returns (detected_items_list, person_analysis_dict)."""
     text = response_text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text)
     text = re.sub(r'\s*```$', '', text)
     text = text.strip()
 
-    start = text.find('[')
-    end = text.rfind(']')
-    if start == -1 or end == -1:
-        return []
+    person_analysis = None
+    raw_items = []
 
-    items = json.loads(text[start:end + 1])
+    # Try parsing as JSON object first (new format with person_analysis + detected_items)
+    try:
+        start_obj = text.find('{')
+        end_obj = text.rfind('}')
+        if start_obj != -1 and end_obj != -1:
+            parsed = json.loads(text[start_obj:end_obj + 1])
+            if isinstance(parsed, dict):
+                if 'person_analysis' in parsed:
+                    person_analysis = parsed['person_analysis']
+                if 'detected_items' in parsed and isinstance(parsed['detected_items'], list):
+                    raw_items = parsed['detected_items']
+                elif not raw_items:
+                    # Fallback: maybe the dict contains item-like keys directly
+                    pass
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: try parsing as a JSON array (legacy format)
+    if not raw_items:
+        try:
+            start = text.find('[')
+            end = text.rfind(']')
+            if start != -1 and end != -1:
+                raw_items = json.loads(text[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            return [], None
+
     validated = []
-
-    for item in items:
+    for item in raw_items:
         if not isinstance(item, dict):
             continue
         raw_name = item.get('name', '').strip()
@@ -415,7 +463,7 @@ def parse_detection_response(response_text: str) -> list:
             'style_tags':    style_tags,
         })
 
-    return validated
+    return validated, person_analysis
 
 
 # ---------------------------------------------------------------------------
@@ -546,14 +594,14 @@ class handler(BaseHTTPRequestHandler):
                         image_content
                     ]
                 }],
-                max_tokens=3000,
+                max_tokens=4000,
                 temperature=0.2
             )
 
             raw_content = response.choices[0].message.content
 
             # 5. Parse + normalize + enrich
-            detected_items = parse_detection_response(raw_content)
+            detected_items, person_analysis = parse_detection_response(raw_content)
 
             # 6. Deduplicate
             detected_items = deduplicate(detected_items)
@@ -565,6 +613,7 @@ class handler(BaseHTTPRequestHandler):
                 self._write_json({
                     'success': True,
                     'detected_items': [],
+                    'person_analysis': person_analysis,
                     'summary': 'No clothing items detected. Please try a clearer photo with better lighting.',
                     'count': 0,
                     'sections': {},
@@ -582,6 +631,7 @@ class handler(BaseHTTPRequestHandler):
             self._write_json({
                 'success': True,
                 'detected_items': detected_items,
+                'person_analysis': person_analysis,
                 'summary': summary,
                 'count': len(detected_items),
                 'sections': sections,
