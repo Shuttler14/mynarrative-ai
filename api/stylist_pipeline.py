@@ -748,7 +748,32 @@ class handler(BaseHTTPRequestHandler):
         try:
             # ─── PARSE REQUEST ───
             content_length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(content_length)) if content_length else {}
+            
+            # Check for oversized payload (Vercel Hobby plan limit: 4.5 MB)
+            MAX_BODY_SIZE = 4.5 * 1024 * 1024  # 4.5 MB in bytes
+            if content_length > MAX_BODY_SIZE:
+                self._respond(413, {
+                    "success": False,
+                    "error": "Payload too large. Image size exceeds Vercel Hobby plan limit (4.5 MB). Please use a smaller image.",
+                })
+                return
+            
+            body = b''
+            if content_length > 0:
+                body = self.rfile.read(content_length)
+            
+            if not body:
+                self._respond(400, {
+                    "success": False,
+                    "error": "Empty request body. Please provide valid JSON data.",
+                })
+                return
+            
+            try:
+                body = json.loads(body)
+            except json.JSONDecodeError:
+                self._respond(400, {"success": False, "error": "Invalid JSON in request body"})
+                return
 
             action = body.get("action", "full_pipeline")
 
