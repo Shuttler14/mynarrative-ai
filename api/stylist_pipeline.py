@@ -991,3 +991,116 @@ class handler(BaseHTTPRequestHandler):
                 error_msg = "⏱️ Pipeline timed out. The AI models are taking too long. Please try again."
 
             self._respond(500, {"success": False, "error": error_msg})
+
+
+# ============================================================================
+#  VERCEL SERVERLESS HANDLER (Required for Vercel deployment)
+# ============================================================================
+
+def handler(request):
+    """
+    Vercel Python runtime entry point.
+    Wraps the BaseHTTPRequestHandler for Vercel serverless execution.
+    """
+    h = handler()
+    
+    # Parse the request
+    if request.method == 'OPTIONS':
+        h.do_OPTIONS()
+        return {'statusCode': 200, 'headers': get_cors_headers()}
+    
+    if request.method == 'GET':
+        h.do_GET()
+        return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}}
+    
+    if request.method == 'POST':
+        # Read body
+        body = request.body
+        if isinstance(body, str):
+            body = body.encode('utf-8')
+        
+        h.rfile = io.BytesIO(body)
+        h.wfile = io.BytesIO()
+        h.headers = {}
+        for key, value in request.headers.items():
+            h.headers[key] = value
+        h.send_response = lambda status: setattr(h, '_status', status)
+        h.send_header = lambda key, value: None
+        h.end_headers = lambda: None
+        
+        h.do_POST()
+        
+        # Get response
+        response = h.wfile.getvalue()
+        return {
+            'statusCode': getattr(h, '_status', 200),
+            'headers': {'Content-Type': 'application/json', **get_cors_headers()},
+            'body': response.decode('utf-8')
+        }
+    
+    return {'statusCode': 405, 'body': 'Method not allowed'}
+
+
+def get_cors_headers():
+    """Return CORS headers for all responses."""
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Max-Age': '86400',
+    }
+
+
+import io
+
+
+# Store the handler class reference
+_handler_class = handler
+
+
+def handler(req):
+    """
+    Vercel Python Runtime Entry Point
+    Converts Vercel request to WSGI-like interface
+    """
+    import io
+    
+    h = _handler_class(None, None, None)
+    
+    h.command = req.method
+    h.path = req.url
+    
+    body = req.body
+    if body and isinstance(body, str):
+        body = body.encode('utf-8')
+    
+    h.rfile = io.BytesIO(body or b'')
+    h.wfile = io.BytesIO()
+    h.headers = dict(req.headers)
+    h.requestline = ''
+    h.request_version = 'HTTP/1.1'
+    
+    # Track response status
+    status_code = [200]
+    def mock_send_response(code):
+        status_code[0] = code
+    h.send_response = mock_send_response
+    h.send_header = lambda *args: None
+    h.end_headers = lambda: None
+    
+    if req.method == 'POST':
+        h.do_POST()
+    else:
+        h.do_GET()
+    
+    response = h.wfile.getvalue()
+    return {
+        'statusCode': status_code[0],
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+        'body': response.decode('utf-8')
+    }
