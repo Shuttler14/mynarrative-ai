@@ -512,21 +512,32 @@ def build_flux_prompt(biometrics: dict, occasion: str, vibe_id: str) -> str:
     
     gender_label = "man" if gender == "man" else "woman" if gender == "woman" else "person"
     
+    body_description = {
+        "slim": "slim fit athletic physique",
+        "athletic": "well-built athletic physique",
+        "average": "medium build",
+        "plus": "plus size body type"
+    }.get(body_type, "average build")
+    
     prompt = (
-        f"High-end fashion editorial photograph of an Indian {gender_label} with "
-        f"{mst_label} skin tone and {body_type} athletic build. "
+        f"High-end fashion editorial full-body photograph of an Indian {gender_label} "
+        f"with {mst_label} skin tone and {body_description}. "
+        f"The model has a {body_type} body type as specified. "
         f"The outfit consists of: "
-        f"1) A well-fitted {style_direction} top in {best_colors} colors that flatters the {mst_label} skin tone, "
-        f"2) Complementary bottom in matching or complementary shade, "
-        f"3) Stylish footwear, "
-        f"4) Minimal accessories. "
-        f"Style: {vibe_modifier}. "
+        f"1) A perfectly fitted {style_direction} top in {best_colors} colors that complements the {mst_label} skin tone, "
+        f"2) Well-tailored bottom in coordinating shade, "
+        f"3) Stylish footwear appropriate for the occasion, "
+        f"4) Minimal, elegant accessories. "
+        f"Style aesthetic: {vibe_modifier}. "
         f"Setting: {occasion_context}. "
-        f"Cinematic lighting, 4K resolution, texture-rich fabrics, natural skin texture, "
-        f"fashion magazine quality. Full body shot, head to toe visible, facing camera."
+        f"Natural lighting with cinematic touch, 4K ultra resolution, "
+        f"texture-rich fabrics, realistic skin texture with natural pores, "
+        f"fashion magazine editorial quality. "
+        f"Full body shot from head to toe, clearly visible, facing camera directly, "
+        f"no cropping, clean studio background with subtle gradient."
     )
 
-    print(f"🎨 [build_flux_prompt] Generated personalized prompt for {gender_label} with {mst_label} skin tone, vibe: {vibe_label}")
+    print(f"🎨 [build_flux_prompt] Generated personalized prompt for {gender_label} with {mst_label} skin tone, body: {body_type}, vibe: {vibe_label}")
     return prompt
 
 
@@ -934,6 +945,8 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                 vibe_id = body.get("vibe_id")
                 user_image = body.get("user_image")  # Base64 encoded
 
+                print(f"📥 Request received: user_id={user_id}, occasion={occasion}, vibe_id={vibe_id}, image_size={len(user_image) if user_image else 0}")
+
                 if not all([user_id, occasion, vibe_id, user_image]):
                     self._respond(400, {
                         "success": False,
@@ -949,12 +962,20 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                 print("🚀 STEP 2: Extracting biometrics from user photo...")
                 print("━" * 60)
 
-                biometrics_result = extract_biometrics(user_image)
+                try:
+                    biometrics_result = extract_biometrics(user_image)
+                except Exception as e:
+                    print(f"❌ STEP 2 FAILED: {str(e)}")
+                    self._respond(500, {
+                        "success": False,
+                        "error": f"Failed to extract biometrics: {str(e)}",
+                    })
+                    return
 
                 if not biometrics_result.get("face_detected"):
                     self._respond(400, {
                         "success": False,
-                        "error": "No face detected in the uploaded photo. Please upload a clear selfie.",
+                        "error": "No face detected in the uploaded photo. Please upload a clear selfie with your face visible.",
                     })
                     return
 
@@ -977,16 +998,32 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                 #          before face swap can begin)
                 # ═══════════════════════════════════════════════════════
                 print("\n🖼️  STEP 3B: Generating FLUX editorial image...")
-                flux_image_url = generate_flux_image(flux_prompt)
+                print(f"   Prompt: {flux_prompt[:100]}...")
+                
+                try:
+                    flux_image_url = generate_flux_image(flux_prompt)
+                    print(f"   ✅ FLUX generated: {flux_image_url[:80] if flux_image_url else 'None'}...")
+                except Exception as e:
+                    print(f"❌ STEP 3B FAILED: {str(e)}")
+                    # Return the prompt for debugging, but with mock image
+                    flux_image_url = "https://placehold.co/768x1024/1a1a2e/e94560?text=Image+Generation+Failed"
 
                 # ═══════════════════════════════════════════════════════
                 # STEP 3C: Apply Face Swap (SEQUENTIAL — uses FLUX output)
                 # ═══════════════════════════════════════════════════════
                 print("\n🔄 STEP 3C: Applying face swap...")
-                final_image_url = apply_face_swap(
-                    flux_image_url=flux_image_url,
-                    user_face_image=user_image,  # Original uploaded photo
-                )
+                
+                try:
+                    final_image_url = apply_face_swap(
+                        flux_image_url=flux_image_url,
+                        user_face_image=user_image,  # Original uploaded photo
+                    )
+                    print(f"   ✅ Face swap complete: {final_image_url[:80] if final_image_url else 'None'}...")
+                except Exception as e:
+                    print(f"❌ STEP 3C FAILED: {str(e)}")
+                    # Fall back to the FLUX image without face swap
+                    final_image_url = flux_image_url
+                    print("   ⚠️ Using FLUX image without face swap")
 
                 # ═══════════════════════════════════════════════════════
                 # STEP 4: Save to Ghost Closet + Get Affiliate Recommendations
@@ -1083,8 +1120,25 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                     "affiliate_upsells": affiliate_recommendations,
                     "outfit_completion_pct": 100,
 
-                    # Step 5 results: Gamification
+                    # Step 5 results: Gamification + User Profile Data
                     "gamification": gamification,
+                    
+                    # Auto-fill data for user dashboard
+                    "user_profile_data": {
+                        "physique": {
+                            "skin_tone": mst_value,
+                            "skin_tone_label": MST_LABELS.get(mst_value, "Medium"),
+                            "body_type": biometrics_result.get("body_type"),
+                            "gender": biometrics_result.get("gender_presentation"),
+                        },
+                        "color_theory": {
+                            "best_colors": color_theory["best_colors"],
+                            "avoid_colors": color_theory["avoid"],
+                            "undertone_note": color_theory["undertone_note"],
+                        },
+                        "profile_face_card_url": final_image_url,
+                        "generated_at": time.time(),
+                    },
                 }
 
                 self._respond(200, response)
