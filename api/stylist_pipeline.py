@@ -485,51 +485,48 @@ def save_to_ghost_closet(user_id: str, wardrobe_items: list) -> dict:
 #  These MUST be sequential. FLUX and Face Swap are never called together.
 # ============================================================================
 
-def build_flux_prompt(biometrics: dict, wardrobe: dict, occasion: str, vibe_id: str) -> str:
+def build_flux_prompt(biometrics: dict, occasion: str, vibe_id: str) -> str:
     """
-    Constructs a detailed FLUX image generation prompt by combining:
-    - Biometric data (skin tone, body type, gender)
-    - Wardrobe items from the user's photo
-    - Occasion context
-    - Vibe personality modifier
-
-    Returns a single natural-language prompt string for FLUX.
+    Constructs a personalized FLUX image generation prompt by combining:
+    - Biometric data (skin tone, body type, gender) from AWS Rekognition
+    - User's selected preferences (vibe, occasion) from AI stylist
+    - Color theory based on their skin tone
+    
+    Returns a personalized outfit recommendation prompt for FLUX.
     """
-    # Get MST label for skin tone accuracy
     mst_value = biometrics.get("monk_skin_tone", 5)
     mst_label = MST_LABELS.get(mst_value, "Medium")
     gender = biometrics.get("gender_presentation", "person")
     body_type = biometrics.get("body_type", "average")
-
-    # Get vibe style modifier
+    
+    color_data = MST_COLOR_THEORY.get(mst_value, MST_COLOR_THEORY[5])
+    best_colors = ", ".join(color_data.get("best_colors", ["neutral tones"]))
+    
     vibe = VIBE_PRESETS.get(vibe_id, VIBE_PRESETS["caffeine_survivor"])
     vibe_modifier = vibe["flux_modifier"]
-
-    # Get occasion context
+    vibe_label = vibe["label"]
+    
     occ = OCCASION_PRESETS.get(occasion, OCCASION_PRESETS["date_night"])
     occasion_context = occ["flux_context"]
-
-    # Extract the user's existing clothing for style coherence
-    user_items = wardrobe.get("items", [])
-    existing_pieces = []
-    for item in user_items:
-        if item.get("slot") in ("top", "bottom"):
-            existing_pieces.append(f"{item['color']} {item['sub_category']}")
-
-    existing_clothing_str = ", ".join(existing_pieces) if existing_pieces else "stylish contemporary outfit"
-
-    # ─── CONSTRUCT THE PROMPT ───
+    style_direction = occ["style_direction"]
+    
+    gender_label = "man" if gender == "man" else "woman" if gender == "woman" else "person"
+    
     prompt = (
-        f"High-end fashion editorial photograph of an Indian {gender} with "
-        f"{mst_label.lower()} ({mst_label}) skin tone and {body_type} build. "
-        f"Wearing: {vibe_modifier}, styled with {existing_clothing_str}. "
+        f"High-end fashion editorial photograph of an Indian {gender_label} with "
+        f"{mst_label} skin tone and {body_type} athletic build. "
+        f"The outfit consists of: "
+        f"1) A well-fitted {style_direction} top in {best_colors} colors that flatters the {mst_label} skin tone, "
+        f"2) Complementary bottom in matching or complementary shade, "
+        f"3) Stylish footwear, "
+        f"4) Minimal accessories. "
+        f"Style: {vibe_modifier}. "
         f"Setting: {occasion_context}. "
-        f"Shot on Hasselblad, cinematic color grading, 4K resolution, "
-        f"texture-rich fabrics, natural skin texture, fashion magazine quality. "
-        f"Full body shot, head to toe visible, facing camera."
+        f"Cinematic lighting, 4K resolution, texture-rich fabrics, natural skin texture, "
+        f"fashion magazine quality. Full body shot, head to toe visible, facing camera."
     )
 
-    print(f"🎨 [build_flux_prompt] Generated prompt ({len(prompt)} chars)")
+    print(f"🎨 [build_flux_prompt] Generated personalized prompt for {gender_label} with {mst_label} skin tone, vibe: {vibe_label}")
     return prompt
 
 
@@ -946,35 +943,31 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                     return
 
                 # ═══════════════════════════════════════════════════════
-                # STEP 2: PARALLEL — Biometrics + Wardrobe Segmentation
+                # STEP 2: Extract Biometrics using AWS Rekognition
                 # ═══════════════════════════════════════════════════════
                 print("━" * 60)
-                print("🚀 STEP 2: Running parallel extraction pipeline...")
+                print("🚀 STEP 2: Extracting biometrics from user photo...")
                 print("━" * 60)
 
-                biometrics_result = None
-                wardrobe_result = None
+                biometrics_result = extract_biometrics(user_image)
 
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    # Submit both tasks in parallel
-                    biometrics_future = executor.submit(extract_biometrics, user_image)
-                    wardrobe_future = executor.submit(segment_wardrobe, user_image)
+                if not biometrics_result.get("face_detected"):
+                    self._respond(400, {
+                        "success": False,
+                        "error": "No face detected in the uploaded photo. Please upload a clear selfie.",
+                    })
+                    return
 
-                    # Collect results
-                    biometrics_result = biometrics_future.result(timeout=60)
-                    wardrobe_result = wardrobe_future.result(timeout=60)
-
-                print(f"✅ Biometrics: MST={biometrics_result.get('monk_skin_tone')}, "
+                print(f"✅ Biometrics extracted: MST={biometrics_result.get('monk_skin_tone')}, "
+                      f"Gender={biometrics_result.get('gender_presentation')}, "
                       f"Body={biometrics_result.get('body_type')}")
-                print(f"✅ Wardrobe: {wardrobe_result.get('items_detected')} items detected")
 
                 # ═══════════════════════════════════════════════════════
                 # STEP 3A: Build the FLUX prompt
                 # ═══════════════════════════════════════════════════════
-                print("\n🎨 STEP 3A: Building FLUX prompt...")
+                print("\n🎨 STEP 3A: Building personalized FLUX prompt...")
                 flux_prompt = build_flux_prompt(
                     biometrics=biometrics_result,
-                    wardrobe=wardrobe_result,
                     occasion=occasion,
                     vibe_id=vibe_id,
                 )
@@ -996,31 +989,42 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                 )
 
                 # ═══════════════════════════════════════════════════════
-                # STEP 4: Save to Ghost Closet + Get Affiliate Upsells
-                # (These can run in parallel with each other)
+                # STEP 4: Save to Ghost Closet + Get Affiliate Recommendations
                 # ═══════════════════════════════════════════════════════
-                print("\n💾 STEP 4: Saving to Ghost Closet + generating affiliate recommendations...")
+                print("\n💾 STEP 4: Saving profile + generating affiliate recommendations...")
 
-                # Save wardrobe items to vector DB
+                # Save user photo as profile reference in ghost closet
+                user_profile_item = [{
+                    "id": str(uuid.uuid4()),
+                    "slot": "profile_photo",
+                    "category": "User Photo",
+                    "sub_category": "Reference Image",
+                    "color": "N/A",
+                    "description": "User uploaded photo for AI styling",
+                }]
+                
                 closet_result = save_to_ghost_closet(
                     user_id=user_id,
-                    wardrobe_items=wardrobe_result.get("items", []),
+                    wardrobe_items=user_profile_item,
                 )
 
-                # Identify gap items (what user needs to buy)
-                gap_items = identify_gap_items(
-                    wardrobe_items=wardrobe_result.get("items", []),
-                    generated_outfit_items=[],  # Would come from FLUX output analysis
-                )
-
-                # Get affiliate recommendations for each gap item
+                # Generate affiliate recommendations based on occasion + vibe
+                # These are items that would complement the generated look
+                occasion_key = occasion.replace("_", " ")
+                vibe_label = VIBE_PRESETS.get(vibe_id, {}).get("label", "stylish look")
+                
                 affiliate_recommendations = []
-                for gap in gap_items:
+                recommended_items = [
+                    {"item_type": "sneakers", "name": "Footwear"},
+                    {"item_type": "watch", "name": "Accessory"},
+                ]
+                
+                for item in recommended_items:
                     rec = get_affiliate_recommendation(
-                        item_type=gap["item_type"],
-                        style_vibe=VIBE_PRESETS.get(vibe_id, {}).get("label", ""),
+                        item_type=item["item_type"],
+                        style_vibe=vibe_label,
                     )
-                    rec["gap_item"] = gap
+                    rec["recommended_for"] = f"{vibe_label} {occasion_key} look"
                     affiliate_recommendations.append(rec)
 
                 # ═══════════════════════════════════════════════════════
@@ -1045,16 +1049,13 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                     "success": True,
                     "pipeline_duration_seconds": pipeline_duration,
 
-                    # Step 2 results: Biometric + Wardrobe data
+                    # Step 2 results: Biometric data extracted via AWS Rekognition
                     "biometrics": {
                         "monk_skin_tone": mst_value,
                         "mst_label": MST_LABELS.get(mst_value, "Medium"),
                         "body_type": biometrics_result.get("body_type"),
                         "gender_presentation": biometrics_result.get("gender_presentation"),
-                    },
-                    "wardrobe": {
-                        "items_detected": wardrobe_result.get("items_detected", 0),
-                        "items": wardrobe_result.get("items", []),
+                        "confidence": biometrics_result.get("confidence"),
                     },
                     "ghost_closet": closet_result,
 
@@ -1062,12 +1063,12 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                     "editorial": {
                         "flux_prompt": flux_prompt,
                         "flux_image_url": flux_image_url,
-                        "final_image_url": final_image_url,  # After face swap
+                        "final_image_url": final_image_url,
                         "occasion": OCCASION_PRESETS.get(occasion, {}),
                         "vibe": VIBE_PRESETS.get(vibe_id, {}),
                     },
 
-                    # Step 4 results: Color theory + Affiliate upsells
+                    # Step 4 results: Color theory + Affiliate recommendations
                     "color_theory": {
                         "mst_value": mst_value,
                         "best_colors": color_theory["best_colors"],
@@ -1080,7 +1081,7 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                         ),
                     },
                     "affiliate_upsells": affiliate_recommendations,
-                    "outfit_completion_pct": max(0, 100 - (len(gap_items) * 10)),
+                    "outfit_completion_pct": 100,
 
                     # Step 5 results: Gamification
                     "gamification": gamification,
