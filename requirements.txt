@@ -4,6 +4,7 @@ Pillow
 requests
 replicate==0.25.1
 supabase
+stripe>=7.0.0
 pydantic>=2.5.0
 python-multipart>=0.0.6
 boto3>=1.34.0

@@ -1,7 +1,49 @@
 -- =====================================================
--- MY NARRATIVE - CREATOR ECONOMY DATABASE SCHEMA
+-- MY NARRATIVE - CREATOR ECONOMY DATABASE SCHEMA v2.0
 -- =====================================================
 -- Run this in Supabase SQL Editor to set up the database
+-- Safe to re-run: all statements use IF NOT EXISTS / OR REPLACE
+
+-- =====================================================
+-- MIGRATION: Add new columns to creators table (v2.0)
+-- Run this block first if upgrading from v1.0
+-- =====================================================
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='creators' AND column_name='first_name') THEN
+        ALTER TABLE creators ADD COLUMN first_name TEXT DEFAULT '';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='creators' AND column_name='earnings_history') THEN
+        ALTER TABLE creators ADD COLUMN earnings_history JSONB DEFAULT '[]';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='creator_designs' AND column_name='shopify_product_id') THEN
+        ALTER TABLE creator_designs ADD COLUMN shopify_product_id TEXT DEFAULT '';
+    END IF;
+END $$;
+
+-- =====================================================
+-- SERVICE ROLE POLICIES (for API - bypasses RLS)
+-- =====================================================
+-- These allow the Vercel API (using service role key) to read/write all rows
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access creators' AND tablename='creators') THEN
+        CREATE POLICY "Service role full access creators" ON creators FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access designs' AND tablename='creator_designs') THEN
+        CREATE POLICY "Service role full access designs" ON creator_designs FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access payouts' AND tablename='creator_payouts') THEN
+        CREATE POLICY "Service role full access payouts" ON creator_payouts FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access commissions' AND tablename='creator_commissions') THEN
+        CREATE POLICY "Service role full access commissions" ON creator_commissions FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access campus_fests' AND tablename='campus_fests') THEN
+        CREATE POLICY "Service role full access campus_fests" ON campus_fests FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname='Service role full access ghost_items' AND tablename='creator_ghost_items') THEN
+        CREATE POLICY "Service role full access ghost_items" ON creator_ghost_items FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+END $$;
 
 -- =====================================================
 -- CREATORS TABLE
@@ -11,7 +53,8 @@ CREATE TABLE IF NOT EXISTS creators (
     shopify_customer_id TEXT UNIQUE NOT NULL,
     email TEXT NOT NULL,
     username TEXT UNIQUE NOT NULL,
-    avatar_url TEXT DEFAULT '',
+    first_name TEXT DEFAULT '',
+    avatar_url TEXT DEFAULT 'https://api.dicebear.com/7.x/avataaars/svg?seed=creator',
     commission_tier TEXT DEFAULT 'standard',
     commission_rate INTEGER DEFAULT 5,
     balance INTEGER DEFAULT 0,
@@ -22,6 +65,7 @@ CREATE TABLE IF NOT EXISTS creators (
     is_mega_influencer BOOLEAN DEFAULT FALSE,
     is_campus_ambassador BOOLEAN DEFAULT FALSE,
     social_links JSONB DEFAULT '{}',
+    earnings_history JSONB DEFAULT '[]',
     stripe_connect_id TEXT,
     bank_details JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
