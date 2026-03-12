@@ -1141,3 +1141,62 @@ if __name__ == "__main__":
     print(f"Commission Rates: Standard={config.COMMISSION_STANDARD}%, Micro={config.COMMISSION_MICRO}%, Mega={config.COMMISSION_MEGA}%")
     print(f"Payout Thresholds: Store Credit=₹{config.PAYOUT_STORE_CREDIT}, Cash=₹{config.PAYOUT_CASH}")
     print("=" * 60)
+
+# =====================================================
+# VERCEL HANDLER
+# =====================================================
+def handler(event, context):
+    """Vercel Python runtime handler"""
+    from io import BytesIO
+    
+    http_method = event.get('httpMethod', 'GET')
+    path = event.get('path', '/')
+    query_params = event.get('queryStringParameters') or {}
+    headers = event.get('headers') or {}
+    body = event.get('body', '') or ''
+    
+    # Build query string
+    query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
+    full_path = path if not query_string else f"{path}?{query_string}"
+    
+    # Create handler instance
+    h = handler.__new__(handler)
+    h.path = full_path
+    h.headers = headers
+    h.body = body
+    
+    # Create mock wfile for response
+    response = BytesIO()
+    h.wfile = response
+    
+    # Initialize send_response_code
+    h.send_response_code = 200
+    
+    try:
+        if http_method == 'GET':
+            h.do_GET()
+        elif http_method == 'POST':
+            h.do_POST()
+        elif http_method == 'OPTIONS':
+            h.do_OPTIONS()
+        else:
+            h.send_json_response(405, {"error": "Method not allowed"})
+            h.send_response_code = 405
+    except Exception as e:
+        h.send_json_response(500, {"error": str(e)})
+        h.send_response_code = 500
+    
+    # Get response
+    response_bytes = response.getvalue()
+    
+    # Return Vercel format
+    return {
+        'statusCode': h.send_response_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+        'body': response_bytes.decode('utf-8')
+    }
