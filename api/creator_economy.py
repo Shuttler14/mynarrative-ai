@@ -121,13 +121,36 @@ class handler(BaseHTTPRequestHandler):
                     self.send_json_response(200, {
                         "success": True,
                         "data": {
+                            "id": None,
+                            "username": None,
                             "shopify_customer_id": user_id,
                             "balance": 0,
+                            "lifetime_earnings": 0,
+                            "total_items_sold": 0,
+                            "active_listings": 0,
                             "commission_tier": "standard",
+                            "commission_rate": config.COMMISSION_STANDARD,
+                            "style_influence_rank": "rookie_designer",
+                            "social_links": {},
                         }
                     })
             except Exception as e:
-                self.send_json_response(200, {"success": True, "data": {"shopify_customer_id": user_id, "balance": 0}})
+                self.send_json_response(200, {
+                    "success": True,
+                    "data": {
+                        "id": None,
+                        "username": None,
+                        "shopify_customer_id": user_id,
+                        "balance": 0,
+                        "lifetime_earnings": 0,
+                        "total_items_sold": 0,
+                        "active_listings": 0,
+                        "commission_tier": "standard",
+                        "commission_rate": config.COMMISSION_STANDARD,
+                        "style_influence_rank": "rookie_designer",
+                        "social_links": {},
+                    }
+                })
             return
 
         if path == '/api/creators/featured':
