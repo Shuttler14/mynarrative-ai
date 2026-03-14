@@ -53,10 +53,11 @@ CREATE TABLE IF NOT EXISTS creators (
     shopify_customer_id TEXT UNIQUE NOT NULL,
     email TEXT NOT NULL,
     username TEXT UNIQUE NOT NULL,
+    brand_name TEXT DEFAULT '',
     first_name TEXT DEFAULT '',
     avatar_url TEXT DEFAULT 'https://api.dicebear.com/7.x/avataaars/svg?seed=creator',
     commission_tier TEXT DEFAULT 'standard',
-    commission_rate INTEGER DEFAULT 5,
+    commission_rate INTEGER DEFAULT 15,
     balance INTEGER DEFAULT 0,
     lifetime_earnings INTEGER DEFAULT 0,
     active_listings INTEGER DEFAULT 0,
@@ -64,6 +65,16 @@ CREATE TABLE IF NOT EXISTS creators (
     style_influence_rank TEXT DEFAULT 'rookie_designer',
     is_mega_influencer BOOLEAN DEFAULT FALSE,
     is_campus_ambassador BOOLEAN DEFAULT FALSE,
+    -- New verification fields
+    tier TEXT DEFAULT 'basic',
+    is_verified BOOLEAN DEFAULT FALSE,
+    verification_level TEXT DEFAULT 'none',
+    is_invite_only BOOLEAN DEFAULT FALSE,
+    total_followers INTEGER DEFAULT 0,
+    primary_platform TEXT,
+    onboarding_completed BOOLEAN DEFAULT FALSE,
+    onboarding_completed_at TIMESTAMPTZ,
+    -- Social links with verification
     social_links JSONB DEFAULT '{}',
     earnings_history JSONB DEFAULT '[]',
     stripe_connect_id TEXT,
@@ -222,11 +233,27 @@ CREATE POLICY "Public can read active fests" ON campus_fests
     FOR SELECT USING (is_active = true);
 
 -- =====================================================
+-- CREATOR VERIFICATION ENHANCEMENTS
+-- =====================================================
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS tier TEXT DEFAULT 'basic';
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS verification_level TEXT DEFAULT 'none';
+ALTER TABLE creators ADD NOT NULL CONSTRAINT valid_commission_range CHECK (commission_rate >= 0 AND commission_rate <= 100);
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS total_followers INTEGER DEFAULT 0;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS primary_platform TEXT;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS brand_name TEXT;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMPTZ;
+ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_invite_only BOOLEAN DEFAULT FALSE;
+
+-- =====================================================
 -- INDEXES FOR PERFORMANCE
 -- =====================================================
 CREATE INDEX idx_creators_shopify_id ON creators(shopify_customer_id);
 CREATE INDEX idx_creators_username ON creators(username);
 CREATE INDEX idx_creators_mega ON creators(is_mega_influencer) WHERE is_mega_influencer = true;
+CREATE INDEX idx_creators_tier ON creators(tier);
+CREATE INDEX idx_creators_verified ON creators(is_verified) WHERE is_verified = true;
 CREATE INDEX idx_designs_creator ON creator_designs(creator_id);
 CREATE INDEX idx_designs_status ON creator_designs(status) WHERE status = 'active';
 CREATE INDEX idx_commissions_creator ON creator_commissions(creator_id);
