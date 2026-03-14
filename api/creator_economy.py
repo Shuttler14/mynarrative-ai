@@ -175,7 +175,7 @@ class handler(BaseHTTPRequestHandler):
             if not user_id:
                 self.send_json_response(400, {"success": False, "error": "user_id required"})
                 return
-            
+
             balance = 0
             supabase = get_supabase()
             if supabase:
@@ -185,7 +185,7 @@ class handler(BaseHTTPRequestHandler):
                         balance = result.data[0].get("balance", 0)
                 except:
                     pass
-            
+
             if balance < config.PAYOUT_STORE_CREDIT:
                 self.send_json_response(200, {
                     "success": True,
@@ -220,6 +220,173 @@ class handler(BaseHTTPRequestHandler):
                         "cash_withdrawal_unlocked": True,
                     }
                 })
+            return
+
+        if path == '/api/creator/stats':
+            user_id = params.get('user_id', [None])[0]
+            if not user_id:
+                self.send_json_response(400, {"success": False, "error": "user_id required"})
+                return
+
+            supabase = get_supabase()
+            if not supabase:
+                # Demo data for when Supabase is not connected
+                self.send_json_response(200, {
+                    "success": True,
+                    "data": {
+                        "total_earnings": 45280,
+                        "earnings_change": 12,
+                        "designs_sold": 248,
+                        "sales_change": 8,
+                        "rating": 4.8,
+                        "rating_change": 0.2,
+                        "followers": 2400,
+                        "followers_change": 180,
+                        "tier": "gold",
+                        "tier_progress": 65,
+                        "next_tier": "diamond",
+                        "sales_for_next_tier": 50,
+                    }
+                })
+                return
+
+            try:
+                result = supabase.table("creators").select("*").eq("shopify_customer_id", user_id).execute()
+                if result.data:
+                    creator = result.data[0]
+                    self.send_json_response(200, {
+                        "success": True,
+                        "data": {
+                            "total_earnings": creator.get("lifetime_earnings", 0),
+                            "earnings_change": 0,
+                            "designs_sold": creator.get("total_items_sold", 0),
+                            "sales_change": 0,
+                            "rating": creator.get("average_rating", 4.5),
+                            "rating_change": 0,
+                            "followers": creator.get("total_followers", 0),
+                            "followers_change": 0,
+                            "tier": creator.get("commission_tier", "standard"),
+                            "tier_progress": creator.get("tier_progress", 0),
+                            "next_tier": "diamond" if creator.get("commission_tier") == "gold" else "gold",
+                            "sales_for_next_tier": creator.get("sales_for_next_tier", 50),
+                        }
+                    })
+                else:
+                    self.send_json_response(200, {
+                        "success": True,
+                        "data": {
+                            "total_earnings": 0,
+                            "earnings_change": 0,
+                            "designs_sold": 0,
+                            "sales_change": 0,
+                            "rating": 0,
+                            "rating_change": 0,
+                            "followers": 0,
+                            "followers_change": 0,
+                            "tier": "standard",
+                            "tier_progress": 0,
+                            "next_tier": "gold",
+                            "sales_for_next_tier": 50,
+                        }
+                    })
+            except Exception as e:
+                self.send_json_response(200, {
+                    "success": True,
+                    "data": {
+                        "total_earnings": 0,
+                        "earnings_change": 0,
+                        "designs_sold": 0,
+                        "sales_change": 0,
+                        "rating": 0,
+                        "rating_change": 0,
+                        "followers": 0,
+                        "followers_change": 0,
+                        "tier": "standard",
+                        "tier_progress": 0,
+                        "next_tier": "gold",
+                        "sales_for_next_tier": 50,
+                    }
+                })
+            return
+
+        if path == '/api/creator/orders':
+            user_id = params.get('user_id', [None])[0]
+            limit = int(params.get('limit', ['10'])[0])
+
+            supabase = get_supabase()
+            if not supabase:
+                # Demo data for when Supabase is not connected
+                demo_orders = [
+                    {"id": "MN-2847", "product_name": "Floral Summer Dress", "amount": 1299, "status": "completed", "created_at": (datetime.now() - timedelta(hours=2)).isoformat()},
+                    {"id": "MN-2845", "product_name": "Urban Graphic Tee", "amount": 899, "status": "completed", "created_at": (datetime.now() - timedelta(days=1)).isoformat()},
+                    {"id": "MN-2842", "product_name": "Denim Jacket Classic", "amount": 2499, "status": "processing", "created_at": (datetime.now() - timedelta(days=2)).isoformat()},
+                    {"id": "MN-2839", "product_name": "Straight Fit Jeans", "amount": 1799, "status": "completed", "created_at": (datetime.now() - timedelta(days=3)).isoformat()},
+                    {"id": "MN-2835", "product_name": "Casual Hoodie", "amount": 1499, "status": "completed", "created_at": (datetime.now() - timedelta(days=4)).isoformat()},
+                ]
+                self.send_json_response(200, {"success": True, "data": demo_orders[:limit]})
+                return
+
+            try:
+                result = supabase.table("creator_orders").select("*").eq("creator_id", user_id).order("created_at", desc=True).limit(limit).execute()
+                orders = []
+                for order in (result.data or []):
+                    orders.append({
+                        "id": order.get("order_id"),
+                        "product_name": order.get("product_name", "Design Sale"),
+                        "amount": order.get("amount", 0),
+                        "status": order.get("status", "completed"),
+                        "created_at": order.get("created_at"),
+                    })
+                self.send_json_response(200, {"success": True, "data": orders})
+            except Exception as e:
+                self.send_json_response(200, {"success": True, "data": []})
+            return
+
+        if path == '/api/creator/analytics':
+            user_id = params.get('user_id', [None])[0]
+
+            supabase = get_supabase()
+            if not supabase:
+                # Demo data for when Supabase is not connected
+                self.send_json_response(200, {
+                    "success": True,
+                    "data": {
+                        "monthly_earnings": [
+                            {"month": "Oct", "amount": 8500},
+                            {"month": "Nov", "amount": 12300},
+                            {"month": "Dec", "amount": 15800},
+                            {"month": "Jan", "amount": 11200},
+                            {"month": "Feb", "amount": 18480},
+                        ],
+                        "top_products": [
+                            {"name": "Floral Summer Dress", "sales": 45, "revenue": 58455},
+                            {"name": "Urban Graphic Tee", "sales": 38, "revenue": 34162},
+                            {"name": "Denim Jacket Classic", "sales": 22, "revenue": 54978},
+                        ],
+                        "demographics": {
+                            "ages": {"18-24": 35, "25-34": 45, "35-44": 15, "45+": 5},
+                            "locations": {"Mumbai": 30, "Delhi": 25, "Bangalore": 20, "Other": 25},
+                        },
+                    }
+                })
+                return
+
+            try:
+                result = supabase.table("creators").select("*").eq("shopify_customer_id", user_id).execute()
+                if result.data:
+                    creator = result.data[0]
+                    self.send_json_response(200, {
+                        "success": True,
+                        "data": creator.get("analytics", {
+                            "monthly_earnings": [],
+                            "top_products": [],
+                            "demographics": {},
+                        })
+                    })
+                else:
+                    self.send_json_response(200, {"success": True, "data": {}})
+            except Exception as e:
+                self.send_json_response(200, {"success": True, "data": {}})
             return
 
         self.send_json_response(404, {"error": "Not found"})
