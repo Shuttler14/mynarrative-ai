@@ -53,11 +53,10 @@ CREATE TABLE IF NOT EXISTS creators (
     shopify_customer_id TEXT UNIQUE NOT NULL,
     email TEXT NOT NULL,
     username TEXT UNIQUE NOT NULL,
-    brand_name TEXT DEFAULT '',
     first_name TEXT DEFAULT '',
     avatar_url TEXT DEFAULT 'https://api.dicebear.com/7.x/avataaars/svg?seed=creator',
     commission_tier TEXT DEFAULT 'standard',
-    commission_rate INTEGER DEFAULT 15,
+    commission_rate INTEGER DEFAULT 5,
     balance INTEGER DEFAULT 0,
     lifetime_earnings INTEGER DEFAULT 0,
     active_listings INTEGER DEFAULT 0,
@@ -65,16 +64,6 @@ CREATE TABLE IF NOT EXISTS creators (
     style_influence_rank TEXT DEFAULT 'rookie_designer',
     is_mega_influencer BOOLEAN DEFAULT FALSE,
     is_campus_ambassador BOOLEAN DEFAULT FALSE,
-    -- New verification fields
-    tier TEXT DEFAULT 'basic',
-    is_verified BOOLEAN DEFAULT FALSE,
-    verification_level TEXT DEFAULT 'none',
-    is_invite_only BOOLEAN DEFAULT FALSE,
-    total_followers INTEGER DEFAULT 0,
-    primary_platform TEXT,
-    onboarding_completed BOOLEAN DEFAULT FALSE,
-    onboarding_completed_at TIMESTAMPTZ,
-    -- Social links with verification
     social_links JSONB DEFAULT '{}',
     earnings_history JSONB DEFAULT '[]',
     stripe_connect_id TEXT,
@@ -233,27 +222,11 @@ CREATE POLICY "Public can read active fests" ON campus_fests
     FOR SELECT USING (is_active = true);
 
 -- =====================================================
--- CREATOR VERIFICATION ENHANCEMENTS
--- =====================================================
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS tier TEXT DEFAULT 'basic';
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS verification_level TEXT DEFAULT 'none';
-ALTER TABLE creators ADD NOT NULL CONSTRAINT valid_commission_range CHECK (commission_rate >= 0 AND commission_rate <= 100);
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS total_followers INTEGER DEFAULT 0;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS primary_platform TEXT;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS brand_name TEXT;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMPTZ;
-ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_invite_only BOOLEAN DEFAULT FALSE;
-
--- =====================================================
 -- INDEXES FOR PERFORMANCE
 -- =====================================================
 CREATE INDEX idx_creators_shopify_id ON creators(shopify_customer_id);
 CREATE INDEX idx_creators_username ON creators(username);
 CREATE INDEX idx_creators_mega ON creators(is_mega_influencer) WHERE is_mega_influencer = true;
-CREATE INDEX idx_creators_tier ON creators(tier);
-CREATE INDEX idx_creators_verified ON creators(is_verified) WHERE is_verified = true;
 CREATE INDEX idx_designs_creator ON creator_designs(creator_id);
 CREATE INDEX idx_designs_status ON creator_designs(status) WHERE status = 'active';
 CREATE INDEX idx_commissions_creator ON creator_commissions(creator_id);
@@ -431,59 +404,3 @@ ON CONFLICT DO NOTHING;
 -- DONE
 -- =====================================================
 SELECT 'Database schema created successfully!' AS status;
--- =====================================================
--- PLATFORM CONNECTIONS (Social Verification via Nango)
--- =====================================================
--- Stores verified social platform connections per creator.
--- Tokens are NEVER stored here — Nango holds encrypted credentials.
--- nango_connection_id is the reference we pass to Nango proxy.
--- Supabase Realtime is enabled so frontend gets live updates.
-
-create table if not exists platform_connections (
-  id                   uuid primary key default gen_random_uuid(),
-  creator_id           uuid references auth.users(id) on delete cascade,
-  platform             text not null check (platform in ('instagram','youtube','twitter','linkedin')),
-  nango_connection_id  text not null,       -- Nango reference ID (no raw token stored)
-  username             text,
-  display_name         text,
-  avatar_url           text,
-  follower_count       bigint default 0,
-  verified             boolean default false,
-  qualifies_elite      boolean default false,
-  commission_range     text,                -- e.g. "30-45%" — set post-verification
-  commission_note      text,
-  needs_manual_review  boolean default false,
-  last_synced          timestamptz default now(),
-  created_at           timestamptz default now(),
-  unique(creator_id, platform)
-);
-
--- Row Level Security: creators can only read their own connections
-alter table platform_connections enable row level security;
-
-create policy if not exists "Creators can view own connections"
-  on platform_connections for select
-  using (auth.uid() = creator_id);
-
-create policy if not exists "Service role can manage all connections"
-  on platform_connections for all
-  using (auth.role() = 'service_role');
-
--- Enable Realtime so frontend dashboard updates live when webhook fires
-alter publication supabase_realtime add table platform_connections;
-
--- Index for fast creator lookups
-create index if not exists idx_platform_connections_creator_id
-  on platform_connections(creator_id);
-
-create index if not exists idx_platform_connections_platform
-  on platform_connections(platform);
-
--- =====================================================
--- AVATARS STORAGE BUCKET
--- =====================================================
--- Run this in Supabase Dashboard > Storage > New Bucket
--- or use the SQL below (requires pg_storage extension):
--- insert into storage.buckets (id, name, public)
---   values ('avatars', 'avatars', true)
---   on conflict (id) do nothing;
