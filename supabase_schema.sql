@@ -431,3 +431,59 @@ ON CONFLICT DO NOTHING;
 -- DONE
 -- =====================================================
 SELECT 'Database schema created successfully!' AS status;
+-- =====================================================
+-- PLATFORM CONNECTIONS (Social Verification via Nango)
+-- =====================================================
+-- Stores verified social platform connections per creator.
+-- Tokens are NEVER stored here — Nango holds encrypted credentials.
+-- nango_connection_id is the reference we pass to Nango proxy.
+-- Supabase Realtime is enabled so frontend gets live updates.
+
+create table if not exists platform_connections (
+  id                   uuid primary key default gen_random_uuid(),
+  creator_id           uuid references auth.users(id) on delete cascade,
+  platform             text not null check (platform in ('instagram','youtube','twitter','linkedin')),
+  nango_connection_id  text not null,       -- Nango reference ID (no raw token stored)
+  username             text,
+  display_name         text,
+  avatar_url           text,
+  follower_count       bigint default 0,
+  verified             boolean default false,
+  qualifies_elite      boolean default false,
+  commission_range     text,                -- e.g. "30-45%" — set post-verification
+  commission_note      text,
+  needs_manual_review  boolean default false,
+  last_synced          timestamptz default now(),
+  created_at           timestamptz default now(),
+  unique(creator_id, platform)
+);
+
+-- Row Level Security: creators can only read their own connections
+alter table platform_connections enable row level security;
+
+create policy if not exists "Creators can view own connections"
+  on platform_connections for select
+  using (auth.uid() = creator_id);
+
+create policy if not exists "Service role can manage all connections"
+  on platform_connections for all
+  using (auth.role() = 'service_role');
+
+-- Enable Realtime so frontend dashboard updates live when webhook fires
+alter publication supabase_realtime add table platform_connections;
+
+-- Index for fast creator lookups
+create index if not exists idx_platform_connections_creator_id
+  on platform_connections(creator_id);
+
+create index if not exists idx_platform_connections_platform
+  on platform_connections(platform);
+
+-- =====================================================
+-- AVATARS STORAGE BUCKET
+-- =====================================================
+-- Run this in Supabase Dashboard > Storage > New Bucket
+-- or use the SQL below (requires pg_storage extension):
+-- insert into storage.buckets (id, name, public)
+--   values ('avatars', 'avatars', true)
+--   on conflict (id) do nothing;

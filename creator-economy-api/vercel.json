@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/**/*": {
-      "maxDuration": 90
-    }
-  },
   "headers": [
     {
       "source": "/api/(.*)",

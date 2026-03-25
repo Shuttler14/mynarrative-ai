@@ -15,9 +15,80 @@ class handler(BaseHTTPRequestHandler):
         """Handle CORS preflight"""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
+    def do_GET(self):
+        """Handle GET requests with query parameters"""
+        from urllib.parse import urlparse, parse_qs
+        
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        
+        action = params.get('action', [None])[0]
+        user_id = params.get('user_id', [None])[0]
+        
+        if not user_id:
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": False, "error": "user_id is required"}).encode('utf-8'))
+            return
+        
+        # For GET requests, return demo response if Supabase not configured
+        if not supabase:
+            if action == 'get_closet':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "items": []}).encode('utf-8'))
+                return
+            elif action == 'get_twin':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "url": None}).encode('utf-8'))
+                return
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "message": "Demo mode"}).encode('utf-8'))
+                return
+        
+        try:
+            if action == 'get_closet':
+                result = supabase.table("closet_items").select("*").eq("user_id", user_id).execute()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "items": result.data or []}).encode('utf-8'))
+            elif action == 'get_twin':
+                result = supabase.table("profiles").select("twin_photo_url").eq("id", user_id).execute()
+                url = result.data[0].get("twin_photo_url") if result.data else None
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "url": url}).encode('utf-8'))
+            else:
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": "Invalid action"}).encode('utf-8'))
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
 
     def do_POST(self):
         try:

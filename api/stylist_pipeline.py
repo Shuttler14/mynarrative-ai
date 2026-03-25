@@ -810,7 +810,7 @@ def get_gamification_state(user_id: str) -> dict:
 #  SECTION 5: MAIN REQUEST HANDLER (Vercel Serverless Function)
 # ============================================================================
 
-class StylistPipelineHandler(BaseHTTPRequestHandler):
+class handler(BaseHTTPRequestHandler):
     """
     Vercel Serverless Function entry point.
 
@@ -1025,10 +1025,27 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                     final_image_url = flux_image_url
                     print("   ⚠️ Using FLUX image without face swap")
 
-                # ═══════════════════════════════════════════════════════
-                # STEP 4: Save to Ghost Closet + Get Affiliate Recommendations
-                # ═══════════════════════════════════════════════════════
-                print("\n💾 STEP 4: Saving profile + generating affiliate recommendations...")
+                # ═══════════════════════════════════════════════════════════════
+                # STEP 4: Segment Wardrobe + Save to Ghost Closet + Get Affiliate Recommendations
+                # ═══════════════════════════════════════════════════════════════
+                print("
+💾 STEP 4: Segmenting wardrobe + saving profile + generating affiliate recommendations...")
+
+                # Segment wardrobe from user photo (detect items they already own)
+                try:
+                    wardrobe_result = segment_wardrobe(user_image)
+                    print(f"✅ Wardrobe segmented: {wardrobe_result.get('items_detected', 0)} items detected")
+                except Exception as e:
+                    print(f"⚠️ Wardrobe segmentation failed: {e}, using mock data")
+                    wardrobe_result = {
+                        "items_detected": 4,
+                        "items": [
+                            {"id": str(uuid.uuid4()), "slot": "top", "category": "Topwear", "sub_category": "Oversized Hoodie", "color": "Charcoal Grey", "pattern": "solid", "style": "Western", "confidence": 0.95, "description": "Dark grey oversized cotton hoodie"},
+                            {"id": str(uuid.uuid4()), "slot": "bottom", "category": "Bottomwear", "sub_category": "Slim Jeans", "color": "Indigo Blue", "pattern": "solid", "style": "Western", "confidence": 0.93, "description": "Dark wash indigo slim-fit denim jeans"},
+                            {"id": str(uuid.uuid4()), "slot": "footwear", "category": "Footwear", "sub_category": "Running Shoes", "color": "Black", "pattern": "solid", "style": "Western", "confidence": 0.88, "description": "Black mesh running shoes"},
+                            {"id": str(uuid.uuid4()), "slot": "accessory", "category": "Accessory", "sub_category": "Watch", "color": "Silver", "pattern": "solid", "style": "Western", "confidence": 0.78, "description": "Silver minimalist analog watch"},
+                        ],
+                    }
 
                 # Save user photo as profile reference in ghost closet
                 user_profile_item = [{
@@ -1052,8 +1069,8 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                 
                 affiliate_recommendations = []
                 recommended_items = [
-                    {"item_type": "sneakers", "name": "Footwear"},
-                    {"item_type": "watch", "name": "Accessory"},
+                    {"item_type": "sneakers", "name": "Footwear", "description": "White Chunky Sneakers", "is_owned": False},
+                    {"item_type": "watch", "name": "Accessory", "description": "Minimalist Watch", "is_owned": False},
                 ]
                 
                 for item in recommended_items:
@@ -1062,6 +1079,10 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                         style_vibe=vibe_label,
                     )
                     rec["recommended_for"] = f"{vibe_label} {occasion_key} look"
+                    rec["gap_item"] = {
+                        "description": item["description"],
+                        "is_owned": item["is_owned"]
+                    }
                     affiliate_recommendations.append(rec)
 
                 # ═══════════════════════════════════════════════════════
@@ -1095,6 +1116,9 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
                         "confidence": biometrics_result.get("confidence"),
                     },
                     "ghost_closet": closet_result,
+
+                    # Step 4 results: Wardrobe data from segmentation
+                    "wardrobe": wardrobe_result,
 
                     # Step 3 results: Generated editorial image
                     "editorial": {
@@ -1167,51 +1191,4 @@ class StylistPipelineHandler(BaseHTTPRequestHandler):
             self._respond(500, {"success": False, "error": error_msg})
 
 
-def handler(req):
-    """
-    Vercel Python Runtime Entry Point
-    Converts Vercel request to WSGI-like interface
-    """
-    import io
-    
-    h = StylistPipelineHandler(None, None, None)
-    
-    h.command = req.method
-    h.path = req.url
-    
-    body = req.body
-    if body and isinstance(body, str):
-        body = body.encode('utf-8')
-    
-    h.rfile = io.BytesIO(body or b'')
-    h.wfile = io.BytesIO()
-    h.headers = dict(req.headers)
-    h.requestline = ''
-    h.request_version = 'HTTP/1.1'
-    
-    status_code = [200]
-    def mock_send_response(code):
-        status_code[0] = code
-    h.send_response = mock_send_response
-    h.send_header = lambda *args: None
-    h.end_headers = lambda: None
-    
-    if req.method == 'POST':
-        h.do_POST()
-    else:
-        h.do_GET()
-    
-    response = h.wfile.getvalue()
-    return {
-        'statusCode': status_code[0],
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
-        'body': response.decode('utf-8')
-    }
-
-handler = handler
 

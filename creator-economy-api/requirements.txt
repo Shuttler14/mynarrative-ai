@@ -1,0 +1,11 @@
+google-generativeai>=0.7.2
+openai
+Pillow
+requests
+replicate==0.25.1
+supabase
+stripe>=7.0.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+boto3>=1.34.0
+numpy>=1.24.0
