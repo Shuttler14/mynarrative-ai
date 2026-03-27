@@ -1,8 +1,7 @@
 {
   "functions": {
     "api/*.py": {
-      "maxDuration": 90,
-      "runtime": "python3.11"
+      "maxDuration": 90
     }
   },
   "headers": [
