@@ -1,15 +1,10 @@
 {
   "functions": {
-    "api/**/*.py": {
-      "maxDuration": 90
+    "api/*.py": {
+      "maxDuration": 90,
+      "runtime": "python3.11"
     }
   },
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1.py"
-    }
-  ],
   "headers": [
     {
       "source": "/api/(.*)",
