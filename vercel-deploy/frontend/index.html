@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vedic Wisdom | Premium Astrology Services</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #D4AF37;
+            --gold-light: #F4E4BA;
+            --gold-dark: #B8962E;
+            --deep-purple: #1A0A2E;
+            --midnight: #0D0015;
+            --text-light: #FEFEFE;
+            --text-muted: #A89AB8;
+            --gradient-dark: linear-gradient(135deg, #0D0015 0%, #1A0A2E 50%, #2D1B4E 100%);
+            --gradient-gold: linear-gradient(135deg, #D4AF37 0%, #F4E4BA 50%, #D4AF37 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: var(--midnight);
+            color: var(--text-light);
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        .stars {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .star {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            animation: twinkle 3s ease-in-out infinite;
+        }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+
+        .shooting-star {
+            position: fixed;
+            width: 100px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold-light), transparent);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            background: var(--gradient-dark);
+            overflow: hidden;
+        }
+
+        .hero-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.3;
+            animation: orb-float 8s ease-in-out infinite;
+        }
+
+        .hero-orb-1 {
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, var(--gold) 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+            animation-delay: 0s;
+        }
+
+        .hero-orb-2 {
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, #8B45BA 0%, transparent 70%);
+            bottom: -50px;
+            right: -50px;
+            animation-delay: 2s;
+        }
+
+        @keyframes orb-float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -30px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.95); }
+        }
+
+        .hero-zodiac {
+            position: absolute;
+            font-size: 3rem;
+            color: var(--gold);
+            opacity: 0.15;
+            animation: zodiac-float 10s ease-in-out infinite;
+        }
+
+        .hero-zodiac:nth-child(1) { top: 15%; left: 8%; animation-delay: 0s; }
+        .hero-zodiac:nth-child(2) { top: 25%; right: 12%; animation-delay: 1s; }
+        .hero-zodiac:nth-child(3) { bottom: 20%; left: 15%; animation-delay: 2s; }
+        .hero-zodiac:nth-child(4) { bottom: 30%; right: 8%; animation-delay: 3s; }
+
+        @keyframes zodiac-float {
+            0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.15; }
+            50% { transform: translateY(-20px) rotate(10deg); opacity: 0.25; }
+        }
+
+        .hero-content {
+            text-align: center;
+            z-index: 2;
+            max-width: 900px;
+            padding: 2rem;
+        }
+
+        .om-symbol {
+            font-size: 6rem;
+            color: var(--gold);
+            margin-bottom: 1.5rem;
+            text-shadow: 0 0 60px rgba(212, 175, 55, 0.6);
+            animation: glow 3s ease-in-out infinite, om-pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% { text-shadow: 0 0 60px rgba(212, 175, 55, 0.6); transform: scale(1); }
+            50% { text-shadow: 0 0 80px rgba(212, 175, 55, 0.9), 0 0 100px rgba(212, 175, 55, 0.5); transform: scale(1.05); }
+        }
+
+        @keyframes om-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.85; }
+        }
+
+        .hero h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(3rem, 8vw, 5rem);
+            font-weight: 400;
+            letter-spacing: 0.15em;
+            margin-bottom: 1rem;
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: title-shimmer 3s ease-in-out infinite;
+        }
+
+        @keyframes title-shimmer {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.2); }
+        }
+
+        .hero-subtitle {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: clamp(1.2rem, 3vw, 1.8rem);
+            color: var(--text-muted);
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            margin-bottom: 2rem;
+            font-weight: 300;
+            animation: fade-up 1s ease-out 0.5s both;
+        }
+
+        .hero-tagline {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.4rem;
+            color: var(--gold-light);
+            font-style: italic;
+            max-width: 600px;
+            margin: 0 auto 3rem;
+            animation: fade-up 1s ease-out 0.8s both;
+        }
+
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 1.2rem 3.5rem;
+            border: 1px solid var(--gold);
+            color: var(--gold);
+            text-decoration: none;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.85rem;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.4s ease;
+            background: transparent;
+            cursor: pointer;
+            animation: fade-up 1s ease-out 1.1s both;
+        }
+
+        .cta-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: var(--gold);
+            transition: left 0.4s ease;
+            z-index: -1;
+        }
+
+        .cta-button:hover {
+            color: var(--midnight);
+            box-shadow: 0 0 30px rgba(212, 175, 55, 0.4);
+        }
+
+        .cta-button:hover::before {
+            left: 0;
+        }
+
+        .scroll-indicator {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            animation: bounce 2s ease-in-out infinite;
+            z-index: 2;
+        }
+
+        .scroll-indicator svg {
+            width: 30px;
+            height: 30px;
+            fill: var(--gold);
+            opacity: 0.6;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateX(-50%) translateY(0); }
+            50% { transform: translateX(-50%) translateY(10px); }
+        }
+
+        .section {
+            padding: 8rem 2rem;
+            position: relative;
+        }
+
+        .section-title {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
+            text-align: center;
+            margin-bottom: 1rem;
+            color: var(--text-light);
+        }
+
+        .section-subtitle {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.2rem;
+            text-align: center;
+            color: var(--gold);
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            margin-bottom: 4rem;
+        }
+
+        .divider {
+            width: 80px;
+            height: 2px;
+            background: var(--gradient-gold);
+            margin: 0 auto 4rem;
+        }
+
+        .astrologer-section {
+            background: var(--gradient-dark);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .section-bg-pattern {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0.05;
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 5L35 25L55 30L35 35L30 55L25 35L5 30L25 25L30 5Z' fill='%23D4AF37' fill-opacity='1'/%3E%3C/svg%3E");
+        }
+
+        .cosmic-circle {
+            position: absolute;
+            border: 1px solid var(--gold);
+            border-radius: 50%;
+            opacity: 0.1;
+            animation: cosmic-rotate 30s linear infinite;
+        }
+
+        .cosmic-circle-1 {
+            width: 400px;
+            height: 400px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .cosmic-circle-2 {
+            width: 300px;
+            height: 300px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-direction: reverse;
+            animation-duration: 25s;
+        }
+
+        @keyframes cosmic-rotate {
+            from { transform: translate(-50%, -50%) rotate(0deg); }
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        .astrologer-container {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 4rem;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .astrologer-image {
+            position: relative;
+        }
+
+        .astrologer-image::before {
+            content: '';
+            position: absolute;
+            top: -20px;
+            left: -20px;
+            right: 20px;
+            bottom: 20px;
+            border: 1px solid var(--gold);
+            opacity: 0.3;
+            animation: border-pulse 3s ease-in-out infinite;
+        }
+
+        @keyframes border-pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.6; }
+        }
+
+        .astrologer-img {
+            width: 100%;
+            height: 500px;
+            object-fit: cover;
+            filter: grayscale(20%) contrast(1.05);
+            transition: transform 0.5s ease;
+        }
+
+        .astrologer-img:hover {
+            transform: scale(1.02);
+        }
+
+        .astrologer-info h2 {
+            font-family: 'Playfair Display', serif;
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            color: var(--gold-light);
+        }
+
+        .astrologer-title {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.4rem;
+            color: var(--gold);
+            margin-bottom: 2rem;
+            letter-spacing: 0.15em;
+        }
+
+        .astrologer-bio {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+            line-height: 1.9;
+            margin-bottom: 2rem;
+        }
+
+        .credentials-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .credential-item {
+            padding: 1.5rem;
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            background: rgba(212, 175, 55, 0.03);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .credential-item::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, transparent 50%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .credential-item:hover {
+            border-color: var(--gold);
+            background: rgba(212, 175, 55, 0.08);
+            transform: translateY(-5px);
+        }
+
+        .credential-item:hover::after {
+            opacity: 1;
+        }
+
+        .credential-number {
+            font-family: 'Playfair Display', serif;
+            font-size: 2rem;
+            color: var(--gold);
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        .credential-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .services-section {
+            background: var(--midnight);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .services-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at 50% 50%, rgba(139, 69, 190, 0.08) 0%, transparent 70%);
+        }
+
+        .services-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .service-card {
+            padding: 3rem 2.5rem;
+            border: 1px solid rgba(212, 175, 55, 0.15);
+            background: linear-gradient(180deg, rgba(26, 10, 46, 0.8) 0%, rgba(13, 0, 21, 0.9) 100%);
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .service-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--gradient-gold);
+            transform: scaleX(0);
+            transition: transform 0.4s ease;
+        }
+
+        .service-card::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(212, 175, 55, 0.1) 0%, transparent 50%);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            pointer-events: none;
+        }
+
+        .service-card:hover {
+            transform: translateY(-8px);
+            border-color: var(--gold);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        .service-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .service-card:hover::after {
+            opacity: 1;
+        }
+
+        .service-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+            display: block;
+            transition: transform 0.3s ease;
+        }
+
+        .service-card:hover .service-icon {
+            transform: scale(1.2);
+        }
+
+        .service-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.6rem;
+            color: var(--gold-light);
+            margin-bottom: 1rem;
+        }
+
+        .service-description {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.8;
+            margin-bottom: 1.5rem;
+        }
+
+        .service-price {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.3rem;
+            color: var(--gold);
+            letter-spacing: 0.1em;
+        }
+
+        .credibilities-section {
+            background: var(--gradient-dark);
+            position: relative;
+        }
+
+        .credibilities-container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .credibilities-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+
+        .credibility-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.5rem;
+            padding: 2rem;
+            border-left: 2px solid var(--gold);
+            background: rgba(212, 175, 55, 0.02);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .credibility-item:hover {
+            background: rgba(212, 175, 55, 0.08);
+            padding-left: 2.5rem;
+        }
+
+        .credibility-icon {
+            width: 50px;
+            height: 50px;
+            border: 1px solid var(--gold);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: var(--gold);
+            flex-shrink: 0;
+            transition: all 0.3s ease;
+        }
+
+        .credibility-item:hover .credibility-icon {
+            background: var(--gold);
+            color: var(--midnight);
+            transform: rotate(360deg);
+        }
+
+        .credibility-content h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.3rem;
+            color: var(--gold-light);
+            margin-bottom: 0.5rem;
+        }
+
+        .credibility-content p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        .testimonials-section {
+            background: var(--midnight);
+            padding: 8rem 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .testimonial-card {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 3rem;
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            background: linear-gradient(180deg, rgba(26, 10, 46, 0.5) 0%, rgba(13, 0, 21, 0.8) 100%);
+            position: relative;
+        }
+
+        .testimonial-card::before {
+            content: '"';
+            position: absolute;
+            top: 20px;
+            left: 40px;
+            font-family: 'Playfair Display', serif;
+            font-size: 8rem;
+            color: var(--gold);
+            opacity: 0.2;
+            line-height: 1;
+        }
+
+        .testimonial-text {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.5rem;
+            font-style: italic;
+            color: var(--text-light);
+            line-height: 1.8;
+            margin-bottom: 2rem;
+        }
+
+        .testimonial-author {
+            color: var(--gold);
+            font-size: 0.9rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        .contact-section {
+            background: var(--gradient-dark);
+            text-align: center;
+            padding: 6rem 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .contact-section::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(212, 175, 55, 0.1) 0%, transparent 70%);
+            animation: pulse-expand 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse-expand {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+        }
+
+        .contact-cta {
+            font-family: 'Playfair Display', serif;
+            font-size: 2.5rem;
+            color: var(--gold-light);
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .contact-subtitle {
+            color: var(--text-muted);
+            margin-bottom: 2.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .contact-button {
+            display: inline-block;
+            padding: 1.2rem 4rem;
+            background: var(--gold);
+            color: var(--midnight);
+            text-decoration: none;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 1;
+            cursor: pointer;
+        }
+
+        .contact-button:hover {
+            background: var(--gold-light);
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 10px 30px rgba(212, 175, 55, 0.4);
+        }
+
+        footer {
+            padding: 3rem 2rem;
+            text-align: center;
+            border-top: 1px solid rgba(212, 175, 55, 0.1);
+            position: relative;
+        }
+
+        .footer-text {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            letter-spacing: 0.1em;
+        }
+
+        .float-element {
+            animation: float-element 6s ease-in-out infinite;
+        }
+
+        @keyframes float-element {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-15px); }
+        }
+
+        @media (max-width: 900px) {
+            .astrologer-container {
+                grid-template-columns: 1fr;
+            }
+
+            .astrologer-image {
+                max-width: 400px;
+                margin: 0 auto;
+            }
+
+            .credentials-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-zodiac {
+                display: none;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .section {
+                padding: 5rem 1.5rem;
+            }
+
+            .service-card {
+                padding: 2rem 1.5rem;
+            }
+
+            .om-symbol {
+                font-size: 4rem;
+            }
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(40px);
+            transition: all 0.8s ease;
+        }
+
+        .reveal.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .reveal-delay-1 { transition-delay: 0.1s; }
+        .reveal-delay-2 { transition-delay: 0.2s; }
+        .reveal-delay-3 { transition-delay: 0.3s; }
+        .reveal-delay-4 { transition-delay: 0.4s; }
+        .reveal-delay-5 { transition-delay: 0.5s; }
+        .reveal-delay-6 { transition-delay: 0.6s; }
+    </style>
+</head>
+<body>
+    <div class="stars" id="stars"></div>
+    <div class="shooting-star" id="shooting-star"></div>
+
+    <section class="hero">
+        <div class="hero-orb hero-orb-1"></div>
+        <div class="hero-orb hero-orb-2"></div>
+        
+        <div class="hero-zodiac">♈</div>
+        <div class="hero-zodiac">♉</div>
+        <div class="hero-zodiac">♋</div>
+        <div class="hero-zodiac">♎</div>
+        
+        <div class="hero-content">
+            <div class="om-symbol">ॐ</div>
+            <h1>Vedic Wisdom</h1>
+            <p class="hero-subtitle">Ancient Astrology for Modern Life</p>
+            <p class="hero-tagline">"Align your destiny with the celestial rhythms of the universe"</p>
+            <a href="#contact" class="cta-button">Consult Now</a>
+        </div>
+        
+        <div class="scroll-indicator">
+            <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+    </section>
+
+    <section class="section astrologer-section">
+        <div class="section-bg-pattern"></div>
+        <div class="cosmic-circle cosmic-circle-1"></div>
+        <div class="cosmic-circle cosmic-circle-2"></div>
+        
+        <div class="astrologer-container">
+            <div class="astrologer-image reveal">
+                <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=600&h=800&fit=crop&crop=face" alt="Astrologer" class="astrologer-img">
+            </div>
+            <div class="astrologer-info">
+                <h2 class="reveal">Pandit Raghav Sharma</h2>
+                <p class="astrologer-title reveal reveal-delay-1">Master Vedic Astrologer & Spiritual Guide</p>
+                <p class="astrologer-bio reveal reveal-delay-2">
+                    With over 25 years of profound experience in the ancient science of Jyotish Shastra, Pandit Raghav Sharma has guided thousands of souls toward their true destiny. Trained under the legendary Acharyas of Varanasi, he mastered the intricate arts of Horoscope Reading, Palmistry, and Vastu Shastra.<br><br>
+                    His unique approach blends traditional Vedic wisdom with contemporary understanding, offering精准 predictions and practical remedies that transform lives. Having performed over 10,000 successful astrological consultations globally, his work has earned recognition from international spiritual organizations.
+                </p>
+                <div class="credentials-grid">
+                    <div class="credential-item reveal reveal-delay-3">
+                        <span class="credential-number">25+</span>
+                        <span class="credential-label">Years Experience</span>
+                    </div>
+                    <div class="credential-item reveal reveal-delay-3">
+                        <span class="credential-number">10,000+</span>
+                        <span class="credential-label">Consultations</span>
+                    </div>
+                    <div class="credential-item reveal reveal-delay-4">
+                        <span class="credential-number">50+</span>
+                        <span class="credential-label">Countries Served</span>
+                    </div>
+                    <div class="credential-item reveal reveal-delay-4">
+                        <span class="credential-number">15+</span>
+                        <span class="credential-label">Certifications</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section services-section">
+        <h2 class="section-title reveal">Divine Services</h2>
+        <p class="section-subtitle reveal reveal-delay-1">Sacred Offerings for Your Journey</p>
+        <div class="divider reveal reveal-delay-2"></div>
+        
+        <div class="services-grid">
+            <div class="service-card reveal">
+                <span class="service-icon">🪔</span>
+                <h3 class="service-title">Birth Chart Reading</h3>
+                <p class="service-description">Comprehensive analysis of your Janam Kundali revealing planetary positions, dashas, and lifetime predictions. Understand your strengths, challenges, and cosmic purpose.</p>
+                <p class="service-price">₹3,000 - ₹5,000</p>
+            </div>
+
+            <div class="service-card reveal reveal-delay-1">
+                <span class="service-icon">🌙</span>
+                <h3 class="service-title">Match Making</h3>
+                <p class="service-description">Detailed Gun Milan and compatibility analysis for marriage alliances. Ensure harmonious unions through kundli matching with detailed remedies.</p>
+                <p class="service-price">₹1,500 per chart</p>
+            </div>
+
+            <div class="service-card reveal reveal-delay-2">
+                <span class="service-icon">✨</span>
+                <h3 class="service-title">Career & Business</h3>
+                <p class="service-description">Strategic guidance for career growth, business ventures, and financial matters. Identify auspicious timing and favorable directions for success.</p>
+                <p class="service-price">₹2,500 - ₹4,000</p>
+            </div>
+
+            <div class="service-card reveal reveal-delay-1">
+                <span class="service-icon">💫</span>
+                <h3 class="service-title">Gemstone Consultation</h3>
+                <p class="service-description">Personalized gemstone recommendations based on your birth chart. Select the right Ratna to balance planetary energies and enhance well-being.</p>
+                <p class="service-price">₹2,000</p>
+            </div>
+
+            <div class="service-card reveal reveal-delay-2">
+                <span class="service-icon">🔮</span>
+                <h3 class="service-title">Puja & Havan</h3>
+                <p class="service-description">Sacred ritual performances for planetary dosha removal, karma purification, and spiritual elevation. Authentic Vedic ceremonies conducted by expert priests.</p>
+                <p class="service-price">₹5,000 - ₹50,000</p>
+            </div>
+
+            <div class="service-card reveal reveal-delay-3">
+                <span class="service-icon">📿</span>
+                <h3 class="service-title">Vastu Consultation</h3>
+                <p class="service-description">Harmonize your living and workspaces with cosmic energies. Expert Vastu Shastra analysis for homes, offices, and commercial properties.</p>
+                <p class="service-price">₹4,000 - ₹10,000</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section credibilities-section">
+        <h2 class="section-title reveal">Trust & Recognition</h2>
+        <p class="section-subtitle reveal reveal-delay-1">Years of Divine Trust</p>
+        <div class="divider reveal reveal-delay-2"></div>
+
+        <div class="credibilities-container">
+            <div class="credibilities-list">
+                <div class="credibility-item reveal">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>Certified Vedic Astrologer</h3>
+                        <p>Recognized by the All India Federation of Astrologers' Societies with advanced certification in Jyotish Shastra.</p>
+                    </div>
+                </div>
+
+                <div class="credibility-item reveal reveal-delay-1">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>International Recognition</h3>
+                        <p>Featured in AstroSage International Conference and awarded for contributions to ancient Vedic sciences.</p>
+                    </div>
+                </div>
+
+                <div class="credibility-item reveal reveal-delay-2">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>Accurate Predictions</h3>
+                        <p>Known for precise predictions validated over decades, with testimonials from clients worldwide.</p>
+                    </div>
+                </div>
+
+                <div class="credibility-item reveal">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>Ethical Practice</h3>
+                        <p>Committed to authentic guidance with no false promises. Follows strict ethical codes of the astrological community.</p>
+                    </div>
+                </div>
+
+                <div class="credibility-item reveal reveal-delay-1">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>Global Clientele</h3>
+                        <p>Served over 50,000 clients across 50+ countries, including celebrities, executives, and spiritual seekers.</p>
+                    </div>
+                </div>
+
+                <div class="credibility-item reveal reveal-delay-2">
+                    <div class="credibility-icon">✓</div>
+                    <div class="credibility-content">
+                        <h3>Media Presence</h3>
+                        <p>Consulted by leading news channels and magazines for astrological insights and predictions.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="testimonials-section">
+        <h2 class="section-title reveal">Voices of Wisdom</h2>
+        <p class="section-subtitle reveal reveal-delay-1">What Seekers Say</p>
+        <div class="divider reveal reveal-delay-2"></div>
+
+        <div class="testimonial-card reveal">
+            <p class="testimonial-text">"Pandit Ji's birth chart reading changed my life. His precise predictions about my career transition came true within months. His remedies transformed my situation completely. A true master of his art."</p>
+            <p class="testimonial-author">— Priya Mehta, Mumbai</p>
+        </div>
+    </section>
+
+    <section class="contact-section" id="contact">
+        <h2 class="contact-cta">Begin Your Journey</h2>
+        <p class="contact-subtitle">The stars await your call. Schedule your consultation today.</p>
+        <a href="tel:+919999999999" class="contact-button">Book Consultation</a>
+    </section>
+
+    <footer>
+        <p class="footer-text">ॐ Peace & Light ॐ</p>
+    </footer>
+
+    <script>
+        const starsContainer = document.getElementById('stars');
+        const starCount = 150;
+
+        for (let i = 0; i < starCount; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            star.style.left = Math.random() * 100 + '%';
+            star.style.top = Math.random() * 100 + '%';
+            star.style.width = Math.random() * 3 + 1 + 'px';
+            star.style.height = star.style.width;
+            star.style.animationDelay = Math.random() * 3 + 's';
+            star.style.animationDuration = (Math.random() * 2 + 2) + 's';
+            starsContainer.appendChild(star);
+        }
+
+        function createShootingStar() {
+            const star = document.createElement('div');
+            star.className = 'shooting-star';
+            star.style.top = Math.random() * 50 + '%';
+            star.style.left = '-100px';
+            star.style.background = `linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.8), rgba(255, 255, 255, 0.8))`;
+            
+            const duration = Math.random() * 1 + 0.5;
+            star.style.transition = `left ${duration}s linear, opacity ${duration}s ease`;
+            
+            document.body.appendChild(star);
+            
+            requestAnimationFrame(() => {
+                star.style.left = '100%';
+                star.style.opacity = '1';
+            });
+            
+            setTimeout(() => {
+                star.style.opacity = '0';
+            }, duration * 1000);
+            
+            setTimeout(() => {
+                star.remove();
+            }, duration * 1000 + 100);
+        }
+
+        setInterval(createShootingStar, 3000);
+
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('active');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.reveal').forEach(el => {
+            observer.observe(el);
+        });
+
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        const heroContent = document.querySelector('.hero-content');
+        heroContent.addEventListener('mousemove', (e) => {
+            const x = (e.clientX / window.innerWidth - 0.5) * 20;
+            const y = (e.clientY / window.innerHeight - 0.5) * 20;
+            heroContent.style.transform = `translate(${x}px, ${y}px)`;
+        });
+
+        heroContent.addEventListener('mouseleave', () => {
+            heroContent.style.transform = 'translate(0, 0)';
+        });
+    </script>
+</body>
+</html>
