@@ -1,0 +1,26 @@
+{
+  "results": [
+    {
+      "topic": "orders/create",
+      "action": "exists",
+      "id": 1638187204800
+    },
+    {
+      "topic": "refunds/create",
+      "action": "exists",
+      "id": 1638187237568
+    },
+    {
+      "topic": "orders/paid",
+      "action": "exists",
+      "id": 1638187270336
+    },
+    {
+      "topic": "orders/fulfilled",
+      "action": "exists",
+      "id": 1638187303104
+    }
+  ],
+  "vercel_url": "https://creator-economy-1ucdnedyn-aryans-projects-af8c9a95.vercel.app",
+  "store": "jjdk0v-0c.myshopify.com"
+}

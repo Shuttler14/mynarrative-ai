@@ -1,12 +1,45 @@
 {
+  "rewrites": [
+    { "source": "/api/designs/feed",              "destination": "/api/design_feed" },
+    { "source": "/api/designs/single",            "destination": "/api/design_feed" },
+    { "source": "/api/designs/creator",           "destination": "/api/design_feed" },
+    { "source": "/api/designs/categories",        "destination": "/api/design_feed" },
+    { "source": "/api/designs/submit",            "destination": "/api/design_feed" },
+    { "source": "/api/designs/like",              "destination": "/api/design_feed" },
+    { "source": "/api/designs/delete",            "destination": "/api/design_feed" },
+    { "source": "/api/webhook/health",            "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_paid",        "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_fulfilled",   "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_refunded",    "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/design-order",      "destination": "/api/design_order_webhook" },
+    { "source": "/api/webhook/design-order/health","destination": "/api/design_order_webhook" },
+    { "source": "/api/webhook/design-refund",     "destination": "/api/design_refund_webhook" },
+    { "source": "/api/webhook/design-refund/health","destination": "/api/design_refund_webhook" },
+    { "source": "/api/designs",                   "destination": "/api/design_feed" },
+    { "source": "/api/design/process",            "destination": "/api/design_pipeline" },
+    { "source": "/api/design/pipeline/health",    "destination": "/api/design_pipeline" },
+    { "source": "/api/design/publish",            "destination": "/api/design_publish" },
+    { "source": "/api/design/publish/health",     "destination": "/api/design_publish" },
+    { "source": "/api/design/feed",               "destination": "/api/design_social_feed" },
+    { "source": "/api/design/feed/health",        "destination": "/api/design_social_feed" },
+    { "source": "/api/creator/earnings",          "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/earnings/health",   "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/earnings/summary",  "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/tokens/grant",      "destination": "/api/creator_tokens" },
+    { "source": "/api/creator/tokens/balance",    "destination": "/api/creator_tokens" },
+    { "source": "/api/creator/tokens/health",     "destination": "/api/creator_tokens" },
+    { "source": "/api/creator/register",          "destination": "/api/creator_register" },
+    { "source": "/api/creator/verify",            "destination": "/api/creator_verification" },
+    { "source": "/api/creator/(.*)",              "destination": "/api/creator_economy" }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
-        { "key": "Access-Control-Max-Age", "value": "86400" }
+        { "key": "Access-Control-Max-Age",       "value": "86400" }
       ]
     }
   ]

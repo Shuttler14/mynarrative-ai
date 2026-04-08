@@ -89,6 +89,100 @@ class handler(BaseHTTPRequestHandler):
             })
             return
 
+        # ── Earnings & Financial Ledger ─────────────────────────────
+        if path in ('/api/creator/earnings', '/api/creator/earnings/health',
+                    '/api/creator/earnings/summary'):
+            if path == '/api/creator/earnings/health':
+                self.send_json_response(200, {"status": "ok", "message": "Creator Earnings API v1.0"})
+                return
+
+            creator_id = params.get('creator_id', [None])[0]
+            if not creator_id:
+                self.send_json_response(400, {"error": "creator_id required"})
+                return
+
+            # Tier progress helper
+            def tier_progress(sold):
+                tiers = [(0,'Bronze',50),(50,'Silver',200),(200,'Gold',1000),(1000,'Diamond',None)]
+                for floor, name, ceil in tiers:
+                    if ceil is None or sold < ceil:
+                        if ceil is None:
+                            return {'current_tier':'Diamond','next_tier':None,'sales_to_next_tier':0,'progress_pct':100}
+                        return {
+                            'current_tier': name,
+                            'next_tier': tiers[tiers.index((floor,name,ceil))+1][1],
+                            'sales_to_next_tier': ceil - sold,
+                            'progress_pct': int(((sold - floor) / (ceil - floor)) * 100)
+                        }
+
+            supabase = get_supabase()
+            if not supabase:
+                demo_sold = 50
+                tp = tier_progress(demo_sold)
+                demo_ledger = [
+                    {"id": "led-001","event_type":"sale","amount_paise":29900,"amount_rupees":299.0,
+                     "product_type":"tshirt","color":"white","quantity":1,
+                     "note":"Sale: Midnight Bloom | tshirt/white × 1","created_at":"2026-04-01T10:00:00Z"},
+                    {"id": "led-002","event_type":"sale","amount_paise":59900,"amount_rupees":599.0,
+                     "product_type":"hoodie","color":"black","quantity":1,
+                     "note":"Sale: Urban Cipher | hoodie/black × 1","created_at":"2026-03-30T14:00:00Z"},
+                    {"id": "led-003","event_type":"refund","amount_paise":-29900,"amount_rupees":-299.0,
+                     "product_type":"tshirt","color":"navy","quantity":1,
+                     "note":"Refund: Midnight Bloom | order ORD-123","created_at":"2026-03-29T09:00:00Z"},
+                    {"id": "led-004","event_type":"sale","amount_paise":49900,"amount_rupees":499.0,
+                     "product_type":"tshirt","color":"sage","quantity":1,
+                     "note":"Sale: Chaos Theory | tshirt/sage × 1","created_at":"2026-03-28T11:00:00Z"},
+                ]
+                self.send_json_response(200, {
+                    "success": True,
+                    "demo_mode": True,
+                    "creator_id": creator_id,
+                    "summary": {
+                        "total_earnings_paise": 50 * 29900,
+                        "total_earnings_rupees": (50 * 29900) / 100,
+                        "total_designs_sold": demo_sold,
+                        "creator_tier": tp['current_tier'],
+                        "tier_progress": tp,
+                    },
+                    "recent_transactions": demo_ledger,
+                })
+                return
+
+            try:
+                cr = supabase.table("creators").select(
+                    "id,total_earnings_paise,total_designs_sold,creator_tier"
+                ).eq("shopify_customer_id", creator_id).execute()
+                if not cr.data:
+                    self.send_json_response(404, {"error": "Creator not found"})
+                    return
+                c = cr.data[0]
+                sold = c.get("total_designs_sold") or 0
+                earnings = c.get("total_earnings_paise") or 0
+                tp = tier_progress(sold)
+                ledger = supabase.table("financial_ledger").select(
+                    "id,event_type,amount_paise,product_type,color,quantity,note,created_at"
+                ).eq("creator_id", c["id"]).order("created_at", desc=True).limit(10).execute()
+                rows = []
+                for row in (ledger.data or []):
+                    row["amount_rupees"] = (row.get("amount_paise") or 0) / 100
+                    rows.append(row)
+                self.send_json_response(200, {
+                    "success": True,
+                    "creator_id": creator_id,
+                    "summary": {
+                        "total_earnings_paise": earnings,
+                        "total_earnings_rupees": earnings / 100,
+                        "total_designs_sold": sold,
+                        "creator_tier": c.get("creator_tier", "Bronze"),
+                        "tier_progress": tp,
+                    },
+                    "recent_transactions": rows,
+                })
+            except Exception as e:
+                self.send_json_response(500, {"error": str(e)})
+            return
+        # ────────────────────────────────────────────────────────────
+
         if path == '/api/creator/profile':
             user_id = params.get('user_id', [None])[0]
             if not user_id:

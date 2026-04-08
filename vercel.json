@@ -9,5 +9,26 @@
         { "key": "Access-Control-Max-Age", "value": "86400" }
       ]
     }
+  ],
+  "rewrites": [
+    { "source": "/api/webhook/order_paid",             "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_fulfilled",        "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_refunded",         "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/health",                 "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/design-order",           "destination": "/api/design_order_webhook" },
+    { "source": "/api/webhook/design-order/health",    "destination": "/api/design_order_webhook" },
+    { "source": "/api/webhook/design-refund",          "destination": "/api/design_refund_webhook" },
+    { "source": "/api/webhook/design-refund/health",   "destination": "/api/design_refund_webhook" },
+    { "source": "/api/designs",                        "destination": "/api/design_feed" },
+    { "source": "/api/design/process",                 "destination": "/api/design_pipeline" },
+    { "source": "/api/design/pipeline/health",         "destination": "/api/design_pipeline" },
+    { "source": "/api/design/publish",                 "destination": "/api/design_publish" },
+    { "source": "/api/design/publish/health",          "destination": "/api/design_publish" },
+    { "source": "/api/design/feed",                    "destination": "/api/design_social_feed" },
+    { "source": "/api/design/feed/health",             "destination": "/api/design_social_feed" },
+    { "source": "/api/creator/earnings",               "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/earnings/summary",       "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/earnings/health",        "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/(.*)",                   "destination": "/api/creator_economy" }
   ]
 }
