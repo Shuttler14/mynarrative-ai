@@ -26,6 +26,7 @@
     { "source": "/api/design/publish/health",          "destination": "/api/design_publish" },
     { "source": "/api/design/feed",                    "destination": "/api/design_social_feed" },
     { "source": "/api/design/feed/health",             "destination": "/api/design_social_feed" },
+    { "source": "/api/fulfillment/generate_gang_sheet","destination": "/api/fulfillment_generate_gang_sheet" },
     { "source": "/api/creator/earnings",               "destination": "/api/creator_earnings" },
     { "source": "/api/creator/earnings/summary",       "destination": "/api/creator_earnings" },
     { "source": "/api/creator/earnings/health",        "destination": "/api/creator_earnings" },

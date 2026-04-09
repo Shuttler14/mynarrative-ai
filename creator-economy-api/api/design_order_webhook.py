@@ -378,6 +378,84 @@ def trigger_jit_upscaling(unique_product_id, design_file_url, order_id):
 import time  # needed by JIT upscaling
 
 
+def update_shopify_order_with_print_file(order_id, high_res_url):
+    """
+    Add high-res print file URL into Shopify Admin for fulfillment operators.
+    Writes to both Order Note and an Order Metafield for visibility and system use.
+    """
+    store_url = (os.environ.get("SHOPIFY_STORE_URL", "") or "").strip().rstrip("/")
+    token = (os.environ.get("SHOPIFY_ADMIN_ACCESS_TOKEN", "") or os.environ.get("SHOPIFY_ACCESS_TOKEN", "") or "").strip()
+    api_version = (os.environ.get("SHOPIFY_API_VERSION", "2024-01") or "2024-01").strip()
+
+    if not store_url or not token or not order_id or not high_res_url:
+        print("[SHOPIFY PRINT URL] Missing config/order/url; skipping order injection")
+        return False
+
+    if store_url.startswith("http://") or store_url.startswith("https://"):
+        base_url = store_url
+    else:
+        base_url = f"https://{store_url}"
+
+    headers = {
+        "X-Shopify-Access-Token": token,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    print_line = f"Print File: {high_res_url}"
+    ok = False
+
+    try:
+        # Read current note, append print file once.
+        get_url = f"{base_url}/admin/api/{api_version}/orders/{order_id}.json?fields=id,note"
+        get_req = urllib.request.Request(get_url, headers=headers, method="GET")
+        existing_note = ""
+        with urllib.request.urlopen(get_req, timeout=20) as r:
+            payload = json.loads(r.read().decode())
+            existing_note = (payload.get("order", {}) or {}).get("note") or ""
+
+        if print_line not in existing_note:
+            new_note = f"{existing_note}\n{print_line}".strip() if existing_note else print_line
+            put_url = f"{base_url}/admin/api/{api_version}/orders/{order_id}.json"
+            put_body = json.dumps({"order": {"id": int(order_id), "note": new_note}}).encode()
+            put_req = urllib.request.Request(put_url, data=put_body, headers=headers, method="PUT")
+            with urllib.request.urlopen(put_req, timeout=20):
+                pass
+            print(f"[SHOPIFY PRINT URL] Note updated for order={order_id}")
+        else:
+            print(f"[SHOPIFY PRINT URL] Note already contains print URL for order={order_id}")
+
+        ok = True
+    except Exception as e:
+        print(f"[SHOPIFY PRINT URL] Note update failed: {e}")
+
+    try:
+        # Also store as order metafield for structured retrieval.
+        mf_url = f"{base_url}/admin/api/{api_version}/orders/{order_id}/metafields.json"
+        mf_payload = {
+            "metafield": {
+                "namespace": "my_narrative",
+                "key": "print_file_url",
+                "type": "single_line_text_field",
+                "value": high_res_url,
+            }
+        }
+        mf_req = urllib.request.Request(
+            mf_url,
+            data=json.dumps(mf_payload).encode(),
+            headers=headers,
+            method="POST"
+        )
+        with urllib.request.urlopen(mf_req, timeout=20):
+            pass
+        print(f"[SHOPIFY PRINT URL] Metafield written for order={order_id}")
+        ok = True
+    except Exception as e:
+        print(f"[SHOPIFY PRINT URL] Metafield write failed: {e}")
+
+    return ok
+
+
 def update_creator_ledger(creator_shopify_id, design_unique_id,
                           order_id, financials, product_type, color,
                           quantity, price_paise, design_title):
@@ -781,8 +859,13 @@ class handler(BaseHTTPRequestHandler):
                             jit_result = trigger_jit_upscaling(
                                 unique_product_id, source_url, order_id
                             )
+                            if jit_result:
+                                update_shopify_order_with_print_file(order_id, jit_result)
                         else:
                             print(f"[JIT] Skipping — already {d.get('upscaling_status')}")
+                            existing_hires = d.get("high_res_master_url")
+                            if existing_hires:
+                                update_shopify_order_with_print_file(order_id, existing_hires)
                     else:
                         print(f"[JIT] Design row not found for uuid={unique_product_id}")
 
