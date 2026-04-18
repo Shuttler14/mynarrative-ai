@@ -201,15 +201,17 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             try:
+                # Accept both legacy ('active') and new ('published') statuses in the public feed
+                # so older rows remain visible while design_publish.py writes status='published'.
                 query = (
                     supabase.table("creator_designs")
                     .select(
                         "id, title, description, flux_editorial_image_url, flat_image_url, "
                         "price, total_sales, total_likes, category, tags, created_at, "
-                        "shopify_product_id, status, "
-                        "creators(username, avatar_url, style_influence_rank, commission_tier)"
+                        "shopify_product_id, shopify_product_url, status, "
+                        "creators(username, narrative_name, avatar_url, style_influence_rank, commission_tier)"
                     )
-                    .eq("status", "active")
+                    .in_("status", ["active", "published"])
                 )
                 if category:
                     query = query.eq("category", category)
@@ -231,22 +233,29 @@ class handler(BaseHTTPRequestHandler):
                     if creator and creator_info.get('username') != creator:
                         continue
                     rank = creator_info.get('style_influence_rank', 'rookie_designer')
-                    designs.append({
+                designs.append({
                         **d,
                         "image_url": d.get("flux_editorial_image_url") or d.get("flat_image_url", ""),
                         "creator_username": creator_info.get("username", "creator"),
+                        "creator_narrative_name": creator_info.get("narrative_name", ""),
                         "creator_avatar": creator_info.get("avatar_url", ""),
                         "creator_tier": rank,
                         "creator_tier_label": RANK_LABELS.get(rank, {}).get("label", ""),
                         "creator_tier_emoji": RANK_LABELS.get(rank, {}).get("emoji", ""),
                         "shopify_product_url": (
-                            f"/products/{d.get('shopify_product_id', '')}"
-                            if d.get("shopify_product_id") else "/collections/all"
+                            d.get("shopify_product_url")
+                            or (f"/products/{d.get('shopify_product_id', '')}"
+                                if d.get("shopify_product_id") else "/collections/all")
                         ),
                     })
 
                 # count total
-                count_res = supabase.table("creator_designs").select("id", count="exact").eq("status", "active").execute()
+                count_res = (
+                    supabase.table("creator_designs")
+                    .select("id", count="exact")
+                    .in_("status", ["active", "published"])
+                    .execute()
+                )
                 total = count_res.count or len(designs)
 
                 self.send_json_response(200, {
@@ -328,7 +337,7 @@ class handler(BaseHTTPRequestHandler):
             try:
                 creator_res = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
                 if not creator_res.data:
-                    self.send_json_response(200, {"success": True, "data": []})
+                    self.send_json_response(200, {"success": True, "data": [], "designs": []})
                     return
                 creator_db_id = creator_res.data[0]["id"]
                 result = (
@@ -344,13 +353,15 @@ class handler(BaseHTTPRequestHandler):
                         **d,
                         "image_url": d.get("flux_editorial_image_url") or d.get("flat_image_url", ""),
                         "shopify_product_url": (
-                            f"/products/{d.get('shopify_product_id', '')}"
-                            if d.get("shopify_product_id") else ""
+                            d.get("shopify_product_url")
+                            or (f"/products/{d.get('shopify_product_id', '')}"
+                                if d.get("shopify_product_id") else "")
                         ),
                     })
-                self.send_json_response(200, {"success": True, "data": designs})
+                # Return under BOTH `data` and `designs` so old and new consumers work.
+                self.send_json_response(200, {"success": True, "data": designs, "designs": designs})
             except Exception as e:
-                self.send_json_response(200, {"success": True, "data": []})
+                self.send_json_response(200, {"success": True, "data": [], "designs": []})
             return
 
         # ------ GET /api/designs/categories ------
@@ -381,8 +392,8 @@ class handler(BaseHTTPRequestHandler):
             try:
                 result = (
                     supabase.table("creator_designs")
-                    .select("id, title, description, flux_editorial_image_url, flat_image_url, price, total_sales, total_likes, category, created_at, shopify_product_id, status")
-                    .eq("status", "active")
+                    .select("id, title, description, flux_editorial_image_url, flat_image_url, price, total_sales, total_likes, category, created_at, shopify_product_id, shopify_product_url, status")
+                    .in_("status", ["active", "published"])
                     .order("created_at", desc=True)
                     .limit(12)
                     .execute()
@@ -417,38 +428,82 @@ class handler(BaseHTTPRequestHandler):
             path = body['path']
 
         # ------ POST /api/designs/submit ------
-        # Creator submits a new design to the feed
+        # Creator submits a new design to the feed. Accepts two payload shapes:
+        #   (a) AI studio:   { user_id, title, image_url, price, category, tags, shopify_product_id }
+        #   (b) Upload flow: { user_id, title, design_file_url, flat_image_url, source, placement,
+        #                     color, status }  ← status defaults to 'draft'
+        # Drafts are NOT shown in the public feed; they appear only on the creator dashboard
+        # until the creator hits /api/design/publish.
         if path == '/api/designs/submit':
             user_id     = body.get('user_id')
-            title       = body.get('title', '').strip()
-            description = body.get('description', '').strip()
-            image_url   = body.get('image_url', '').strip()
-            price       = int(body.get('price', 1299))
+            title       = (body.get('title') or 'Untitled').strip()
+            description = (body.get('description') or '').strip()
+            # Accept image_url, design_file_url, or flat_image_url
+            image_url   = (
+                body.get('image_url')
+                or body.get('design_file_url')
+                or body.get('flat_image_url')
+                or ''
+            ).strip()
+            try:
+                price = int(body.get('price', 1299))
+            except (TypeError, ValueError):
+                price = 1299
             category    = body.get('category', 'tee')
-            tags        = body.get('tags', [])
+            tags        = body.get('tags', []) or []
             shopify_product_id = body.get('shopify_product_id', '')
+            source      = body.get('source', 'creator_upload')
+            placement   = body.get('placement', 'front')
+            color       = body.get('color', '')
+            # Accept any of: 'draft', 'ready', 'active', 'published'; normalize.
+            req_status = (body.get('status') or 'draft').lower().strip()
+            if req_status not in ('draft', 'ready', 'active', 'published'):
+                req_status = 'draft'
 
-            if not user_id or not title or not image_url:
-                self.send_json_response(400, {"success": False, "error": "user_id, title, image_url required"})
+            if not user_id or not image_url:
+                self.send_json_response(400, {"success": False, "error": "user_id and an image url (image_url / design_file_url / flat_image_url) are required"})
                 return
 
             supabase = get_supabase()
             if not supabase:
+                demo_id = str(uuid.uuid4())
                 self.send_json_response(200, {
                     "success": True,
-                    "message": "Design submitted! (demo mode)",
-                    "data": {"id": str(uuid.uuid4()), "status": "active"}
+                    "message": "Design submitted (demo mode)",
+                    "design_id": demo_id,
+                    "id": demo_id,
+                    "status": req_status,
+                    "data": {"id": demo_id, "status": req_status, "image_url": image_url}
                 })
                 return
 
             try:
-                # Resolve creator DB id from shopify customer id
-                creator_res = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
+                # Resolve creator DB id from shopify customer id; auto-create a minimal
+                # creator row if missing so upload flow doesn't dead-end when user hasn't
+                # finished onboarding yet.
+                creator_res = supabase.table("creators").select("id, active_listings").eq("shopify_customer_id", user_id).execute()
                 if not creator_res.data:
-                    self.send_json_response(400, {"success": False, "error": "Creator not found. Please complete onboarding first."})
-                    return
-
-                creator_db_id = creator_res.data[0]["id"]
+                    ins = supabase.table("creators").insert({
+                        "shopify_customer_id": user_id,
+                        "username": f"creator_{str(user_id)[-6:]}",
+                        "balance": 0,
+                        "lifetime_earnings": 0,
+                        "total_items_sold": 0,
+                        "active_listings": 0,
+                        "commission_tier": "standard",
+                        "commission_rate": 15,
+                        "style_influence_rank": "rookie_designer",
+                        "onboarding_completed": False,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }).execute()
+                    creator_db_id = ins.data[0]["id"] if ins.data else None
+                    current_active = 0
+                    if not creator_db_id:
+                        self.send_json_response(500, {"success": False, "error": "Could not create creator record"})
+                        return
+                else:
+                    creator_db_id = creator_res.data[0]["id"]
+                    current_active = creator_res.data[0].get("active_listings", 0) or 0
 
                 design = {
                     "creator_id": creator_db_id,
@@ -459,7 +514,10 @@ class handler(BaseHTTPRequestHandler):
                     "price": price,
                     "category": category,
                     "tags": tags,
-                    "status": "active",
+                    "status": req_status,
+                    "source": source,
+                    "placement": placement,
+                    "color": color,
                     "total_sales": 0,
                     "total_likes": 0,
                     "shopify_product_id": shopify_product_id,
@@ -468,21 +526,19 @@ class handler(BaseHTTPRequestHandler):
                 }
                 result = supabase.table("creator_designs").insert(design).execute()
                 inserted = result.data[0] if result.data else {}
+                design_id = inserted.get("id")
 
-                # Update creator active_listings count
-                supabase.rpc("increment_active_listings", {"creator_id": creator_db_id}).execute() if False else None
-                existing = supabase.table("creators").select("active_listings").eq("id", creator_db_id).execute()
-                current = (existing.data[0].get("active_listings", 0) if existing.data else 0)
-                supabase.table("creators").update({"active_listings": current + 1}).eq("id", creator_db_id).execute()
+                # Only bump active_listings when it's actually public
+                if req_status in ('active', 'published') and design_id:
+                    supabase.table("creators").update({"active_listings": current_active + 1}).eq("id", creator_db_id).execute()
 
                 self.send_json_response(200, {
                     "success": True,
-                    "message": "Design published to the feed! 🎉",
-                    "data": {
-                        "id": inserted.get("id"),
-                        "status": "active",
-                        "image_url": image_url,
-                    }
+                    "message": "Design saved",
+                    "design_id": design_id,
+                    "id": design_id,
+                    "status": req_status,
+                    "data": {"id": design_id, "status": req_status, "image_url": image_url}
                 })
             except Exception as e:
                 self.send_json_response(500, {"success": False, "error": str(e)})

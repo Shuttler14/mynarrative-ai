@@ -1,5 +1,13 @@
 {
+  "functions": {
+    "api/generate_design.py":  { "maxDuration": 60 },
+    "api/generate_slogans.py": { "maxDuration": 30 }
+  },
   "rewrites": [
+    { "source": "/api/ai/slogans",                "destination": "/api/generate_slogans" },
+    { "source": "/api/ai/slogans/health",         "destination": "/api/generate_slogans" },
+    { "source": "/api/ai/design-image",           "destination": "/api/generate_design" },
+    { "source": "/api/ai/design-image/health",    "destination": "/api/generate_design" },
     { "source": "/api/designs/feed",              "destination": "/api/design_feed" },
     { "source": "/api/designs/single",            "destination": "/api/design_feed" },
     { "source": "/api/designs/creator",           "destination": "/api/design_feed" },

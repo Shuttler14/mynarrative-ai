@@ -1,5 +1,5 @@
 google-generativeai>=0.7.2
-openai
+openai>=1.82.0
 Pillow
 requests
 replicate==0.25.1

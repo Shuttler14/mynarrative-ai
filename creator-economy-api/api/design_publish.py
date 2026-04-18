@@ -25,10 +25,52 @@ Endpoints:
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import re
 from urllib.parse import urlparse
 import urllib.request
 import urllib.parse
 import urllib.error
+
+# =====================================================
+# STOREFRONT PARENT PRODUCT HANDLES
+# The "Buy my own design" CTA on the post-publish popup
+# must land the creator on the correct parent product page.
+# These handles are overridable via env vars so ops can swap
+# products without a redeploy.
+# =====================================================
+TSHIRT_PRODUCT_HANDLE = os.environ.get("TSHIRT_PRODUCT_HANDLE", "unisex-t-shirt")
+HOODIE_PRODUCT_HANDLE = os.environ.get("HOODIE_PRODUCT_HANDLE", "unisex-hoodie")
+STOREFRONT_ORIGIN     = os.environ.get("STOREFRONT_ORIGIN", "").rstrip('/')  # optional: 'https://mynarrative.in'
+
+# Default discount % applied on the "Buy my own design" flow.
+# The discount code is created per-creator with this value in Shopify Admin
+# (we only emit the code here; provisioning the actual discount is an ops task).
+CREATOR_SELF_DISCOUNT_PERCENT = int(os.environ.get("CREATOR_SELF_DISCOUNT_PERCENT", "25"))
+
+
+def _creator_discount_code(creator_id, design_id):
+    """Deterministic discount code so the same creator+design always resolves to one code.
+
+    Shopify Admin is expected to have a dynamic discount rule that auto-creates codes
+    matching the pattern `CREATOR-*`; if not, an ops step can create one off
+    the (creator_id, percent) pair. Either way, the URL works because Shopify
+    simply ignores unknown codes rather than failing the product page load.
+    """
+    slug = re.sub(r'[^A-Z0-9]', '', f"{creator_id}{design_id}".upper())[-10:]
+    return f"CREATOR{slug}" if slug else "CREATOR"
+
+
+def _product_url(product_type, design_id, creator_id):
+    """Build the storefront product URL with design & creator context + discount applied."""
+    handle = HOODIE_PRODUCT_HANDLE if product_type == "hoodie" else TSHIRT_PRODUCT_HANDLE
+    base = f"{STOREFRONT_ORIGIN}/products/{handle}" if STOREFRONT_ORIGIN else f"/products/{handle}"
+    code = _creator_discount_code(creator_id, design_id)
+    qs = urllib.parse.urlencode({
+        "design_id": design_id,
+        "creator_id": creator_id,
+        "discount": code,  # Shopify auto-applies ?discount=CODE at cart
+    })
+    return f"{base}?{qs}", code
 
 # =====================================================
 # SHOPIFY VARIANT IDs — used by the FRONTEND cart only
@@ -337,6 +379,7 @@ class handler(BaseHTTPRequestHandler):
             # Demo mode — return mock success so frontend can be tested
             variant_map = build_variant_map(product_type, selected_colors)
             demo_uuid = f"demo-uuid-{design_id[:8]}"
+            demo_product_url, demo_code = _product_url(product_type, design_id, creator_id)
             self.send_json_response(200, {
                 "status": "published",
                 "demo_mode": True,
@@ -346,6 +389,12 @@ class handler(BaseHTTPRequestHandler):
                 "selected_colors": selected_colors,
                 "price_rupees": price_paise / 100,
                 "variant_map": variant_map,
+                # Frontend sample-kit modal uses these to build the
+                # "Buy my own design at a creator-discounted rate" link.
+                "product_url": demo_product_url,
+                "shopify_product_url": demo_product_url,
+                "creator_discount_code": demo_code,
+                "creator_discount_percent": CREATOR_SELF_DISCOUNT_PERCENT,
                 "cart_instructions": {
                     "note": (
                         "When adding to cart, use the variant_id for the chosen color "
@@ -378,18 +427,21 @@ class handler(BaseHTTPRequestHandler):
             unique_product_id = design.get("unique_product_id")
             status = design.get("status")
 
-            if status not in ("ready", "published"):
+            # Accept 'draft' as a starting state too — the upload flow stores drafts
+            # and publishing from the dashboard must transition them to 'published'.
+            if status not in ("draft", "ready", "active", "published"):
                 self.send_json_response(409, {
-                    "error": f"Design status is '{status}'. Must be 'ready' to publish.",
-                    "hint": "Ensure the pipeline (POST /api/design/process) has completed successfully."
+                    "error": f"Design status is '{status}'. Must be draft/ready/active to publish.",
+                    "hint": "Ensure /api/designs/submit or /api/design/process has created the design first."
                 })
                 return
 
             if not unique_product_id:
-                self.send_json_response(400, {
-                    "error": "Design is missing unique_product_id. Re-run the pipeline."
-                })
-                return
+                # Generate a stable UUID from the design row id so the line-item property
+                # scheme still works even when the pipeline hasn't populated it yet
+                # (e.g. direct uploads that skipped /api/design/process).
+                import uuid as _uuid
+                unique_product_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"mn-design:{design_id}"))
 
         except Exception as e:
             self.send_json_response(500, {"error": f"Supabase query failed: {str(e)}"})
@@ -399,19 +451,32 @@ class handler(BaseHTTPRequestHandler):
         # 3. UPDATE SUPABASE — status = 'published', store listing metadata
         #    NO Shopify API call. The 2 parent products are not touched.
         # ------------------------------------------------------------------
+        # Build the storefront product URL + creator discount code *before*
+        # writing to Supabase so we can persist shopify_product_url in the same PATCH.
+        product_url, discount_code = _product_url(product_type, design_id, creator_id)
+
         try:
-            _, err = sb_patch('creator_designs', {
-                "status":          "published",
-                "title":           title,
-                "description":     description,
-                "product_type":    product_type,
-                "selected_colors": selected_colors,
-                "price_paise":     price_paise,
-                "mockup_urls":     mockup_urls,
-            }, 'id', design_id)
+            patch_payload = {
+                "status":              "published",
+                "title":               title,
+                "description":         description,
+                "product_type":        product_type,
+                "selected_colors":     selected_colors,
+                "price_paise":         price_paise,
+                "mockup_urls":         mockup_urls,
+                "unique_product_id":   unique_product_id,
+                "shopify_product_url": product_url,
+            }
+            _, err = sb_patch('creator_designs', patch_payload, 'id', design_id)
             if err:
-                self.send_json_response(500, {"error": f"Failed to update design in Supabase: {err}"})
-                return
+                # Retry without newer columns in case schema hasn't been migrated yet.
+                fallback = {k: v for k, v in patch_payload.items()
+                            if k not in ("product_type", "selected_colors", "price_paise",
+                                         "mockup_urls", "unique_product_id", "shopify_product_url")}
+                _, err2 = sb_patch('creator_designs', fallback, 'id', design_id)
+                if err2:
+                    self.send_json_response(500, {"error": f"Failed to update design in Supabase: {err} / {err2}"})
+                    return
         except Exception as e:
             self.send_json_response(500, {"error": f"Failed to update design in Supabase: {str(e)}"})
             return
@@ -434,6 +499,11 @@ class handler(BaseHTTPRequestHandler):
             "title": title,
             "mockup_urls": mockup_urls,
             "variant_map": variant_map,
+            # For the "Buy my own design" CTA in the post-publish sample-kit modal.
+            "product_url": product_url,
+            "shopify_product_url": product_url,
+            "creator_discount_code": discount_code,
+            "creator_discount_percent": CREATOR_SELF_DISCOUNT_PERCENT,
             # ---------------------------------------------------------------
             # HOW THE PRINT PROVIDER GETS THE DESIGN:
             # When a customer clicks "Buy", the frontend must call:

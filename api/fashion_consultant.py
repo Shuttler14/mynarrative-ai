@@ -3,6 +3,126 @@ import json
 import os
 from openai import OpenAI
 
+MY_NARRATIVE_CATALOG = [
+    {
+        "handle": "my-pet-name-is-iitian-custom-batch-year-unisexual-graphic-printed-varsity-jacket",
+        "title": "IITian Varsity Jacket",
+        "price": 1299,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/minimalist-hoodie-mockup-with-front-design-against-dark-neutral-backdrop-095_3.jpg?v=1755435363",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-name-unisexual-hoodies",
+        "title": "NITian Name Hoodies",
+        "price": 999,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/minimalist-hoodie-mockup-with-front-design-against-dark-neutral-backdrop-095_2.jpg?v=1754661883",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-name-unisexual-t-shirt",
+        "title": "NITian Name Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/Ifalltorisebeautifully_O_5.png?v=1753449803",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-batch-year-unisexual-t-shirt-copy",
+        "title": "NITian Batch Year Hoodies",
+        "price": 999,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/floating-white-hoodie-mockup-front-view-clean-light-grey-background-minimalist-studio-lighting-soft-shadows-design-center-chest-0630_24.jpg?v=1749484980",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-batch-year-unisexual-t-shirt",
+        "title": "NITian Batch Year Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/boxy-blank-white-round-neck-unisex-t-shirt-mockup-back-view-on-hanger-draped-fabric-backdrop-soft-neutral-lighting-minimal-and-elegant-presentation-1009_baef7207-3c62-4b24-83c5-c838f5f3a425.jpg?v=1751661711",
+    },
+    {
+        "handle": "my-pet-name-is-iitian-custom-batch-year-unisexual-t-shirt",
+        "title": "IITian Batch Year Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/studio-display-hoodie-mockup-on-mannequin-with-neutral-gray-background-clean-and-professional-0280_27_7266e927-9122-4c2a-87da-c7ce996ea321.jpg?v=1749142018",
+    },
+]
+
+for _item in MY_NARRATIVE_CATALOG:
+    _item["product_url"] = f"/products/{_item['handle']}"
+
+
+def _is_generic_marketplace_link(url: str) -> bool:
+    if not isinstance(url, str) or not url.strip():
+        return True
+    u = url.strip().lower()
+    if u in ("https://myntra.com", "https://www.myntra.com", "https://ajio.com", "https://www.ajio.com"):
+        return True
+    if u.startswith("https://www.amazon.") and ("/dp/" not in u and "/gp/product/" not in u):
+        return True
+    if "://myntra.com/" in u or "://www.myntra.com/" in u:
+        # Accept only deeper product pages.
+        return "/buy" not in u and "/p/" not in u
+    if "://www.flipkart.com/" in u:
+        return "/p/" not in u and "pid=" not in u
+    return False
+
+
+def _pick_catalog_for_piece(piece: dict) -> dict:
+    text = " ".join([
+        str(piece.get("slot", "")),
+        str(piece.get("type", "")),
+        str(piece.get("name", "")),
+        str(piece.get("why", "")),
+    ]).lower()
+
+    wants_jacket = ("jacket" in text) or ("varsity" in text) or (piece.get("slot") == "outerwear")
+    wants_hoodie = ("hoodie" in text) or ("sweatshirt" in text)
+    wants_tee = ("tee" in text) or ("t-shirt" in text) or ("tshirt" in text) or (piece.get("slot") == "top")
+
+    iitian_hint = "iit" in text
+
+    if wants_jacket:
+        for item in MY_NARRATIVE_CATALOG:
+            if "varsity-jacket" in item["handle"]:
+                return item
+    if wants_hoodie:
+        for item in MY_NARRATIVE_CATALOG:
+            if "hoodies" in item["handle"] and ((iitian_hint and "iitian" in item["handle"]) or (not iitian_hint and "nitian" in item["handle"])):
+                return item
+    if wants_tee:
+        for item in MY_NARRATIVE_CATALOG:
+            if "t-shirt" in item["handle"] and ((iitian_hint and "iitian" in item["handle"]) or (not iitian_hint and "nitian" in item["handle"])):
+                return item
+    # Safe fallback: a tee product page.
+    return MY_NARRATIVE_CATALOG[2]
+
+
+def _attach_exact_links(outfit_pieces: list) -> list:
+    normalized = []
+    for piece in outfit_pieces or []:
+        p = dict(piece)
+        if p.get("owned") is True:
+            p["shop_links"] = []
+            normalized.append(p)
+            continue
+
+        selected = _pick_catalog_for_piece(p)
+        existing_links = [l for l in (p.get("shop_links") or []) if isinstance(l, dict) and not _is_generic_marketplace_link(l.get("url", ""))]
+        # Put MY NARRATIVE exact product as primary link for VTON-ready flow.
+        mn_link = {
+            "platform": "MY NARRATIVE",
+            "url": selected["product_url"],
+            "price": f"₹{selected['price']}",
+            "handle": selected["handle"],
+            "flat_lay_url": selected["flat_lay_url"],
+        }
+        p["shop_links"] = [mn_link] + existing_links[:1]
+        p["my_narrative_product"] = {
+            "handle": selected["handle"],
+            "title": selected["title"],
+            "price": selected["price"],
+            "product_url": selected["product_url"],
+            "flat_lay_url": selected["flat_lay_url"],
+        }
+        normalized.append(p)
+    return normalized
+
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 1. SETUP CORS
@@ -296,13 +416,16 @@ Generate 4-6 outfit pieces that create a complete look. At least 1-2 must be ite
                 }
             else:
                 # Self mode: pass through the full enhanced response
+                outfit_pieces = _attach_exact_links(data.get("outfit_pieces", []))
                 response_payload = {
                     "direction": data.get("direction", "Styled for you."),
-                    "outfit_pieces": data.get("outfit_pieces", []),
+                    "outfit_pieces": outfit_pieces,
                     "suggestions": data.get("suggestions", []),
                     "styling_tips": data.get("styling_tips", []),
                     "color_science": data.get("color_science", ""),
-                    "archetype_note": data.get("archetype_note", "")
+                    "archetype_note": data.get("archetype_note", ""),
+                    "my_narrative_catalog": MY_NARRATIVE_CATALOG,
+                    "vton_ready_products": [p.get("my_narrative_product") for p in outfit_pieces if p.get("my_narrative_product")][:6],
                 }
 
             self.wfile.write(json.dumps(response_payload).encode('utf-8'))

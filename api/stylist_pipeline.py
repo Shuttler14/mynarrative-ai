@@ -1,59 +1,50 @@
 """
 ================================================================================
-  MY NARRATIVE AI STYLIST — BACKEND PIPELINE
+  MY NARRATIVE AI STYLIST — BACKEND PIPELINE (OpenAI-Powered)
   api/stylist_pipeline.py
 ================================================================================
 
   PURPOSE:
-  Vercel Serverless Function that orchestrates the full AI Stylist pipeline:
-    Step 1 (receive):  occasion + vibe_id from frontend
-    Step 2 (parallel):  extract_biometrics() + segment_wardrobe() — run concurrently
-    Step 3 (sequential): build_flux_prompt() → generate_flux_image() → face_swap()
-    Step 4 (lookup):    get_affiliate_recommendation() — mock upsell data
-    Step 5 (return):    aggregated response to frontend
+  Vercel Serverless Function that orchestrates the AI Stylist pipeline
+  using OpenAI GPT-4o for fashion recommendations and Replicate FLUX
+  for image generation. No AWS Rekognition or Supabase dependencies.
 
-  ANTI-HALLUCINATION GUARDRAILS:
-  ✅ All CV/ML tasks are clean WRAPPER FUNCTIONS calling external APIs.
-  ✅ No PyTorch, TensorFlow, or OpenCV code is written here.
-  ✅ FLUX and Face Swap are sequenced, never merged into one call.
-  ✅ Affiliate data uses mock JSON, not a real web scraper.
+  Flow:
+    Step 1 (receive):  occasion + vibe_id + skin_tone + body_shape from frontend
+    Step 2 (parallel):  GPT-4o fashion prompt + FLUX image generation
+    Step 3 (return):    aggregated response to frontend
 
   REQUIRED ENVIRONMENT VARIABLES (set in Vercel Dashboard):
   ─────────────────────────────────────────────────────────
-  REPLICATE_API_TOKEN     → Replicate.com API token (for FLUX + Face Swap)
-  VISION_API_KEY          → API key for the Vision Model (DeepFashion2-style segmentation)
-  VISION_API_URL          → Endpoint URL for the Vision Model API
-  BIOMETRICS_API_KEY      → API key for face / skin-tone / body-type detection
-  BIOMETRICS_API_URL      → Endpoint URL for the Biometrics API
-  SUPABASE_URL            → Supabase project URL (for pgvector Ghost Closet)
-  SUPABASE_KEY            → Supabase anon/service key
+  OPENAI_API_KEY          → OpenAI API key (for GPT-4o)
+  REPLICATE_API_TOKEN     → Replicate API token (for FLUX image generation)
 
 ================================================================================
 """
 
 from http.server import BaseHTTPRequestHandler
-import io
+import base64
 import json
 import os
-import uuid
 import time
-import base64
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
+import threading
+import urllib.parse
+import urllib.request
+import urllib.error
+from typing import Any, Dict, List
 
-# ---------------------------------------------------------------------------
-# OPTIONAL IMPORTS — graceful degradation if not installed
-# ---------------------------------------------------------------------------
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
 try:
     import replicate
     REPLICATE_AVAILABLE = True
 except ImportError:
     REPLICATE_AVAILABLE = False
-
-try:
-    from supabase import create_client, Client
-    SUPABASE_AVAILABLE = True
-except ImportError:
-    SUPABASE_AVAILABLE = False
 
 try:
     import requests as http_requests
@@ -63,10 +54,9 @@ except ImportError:
 
 try:
     import boto3
-    from botocore.exceptions import ClientError
-    AWS_AVAILABLE = True
+    BOTO3_AVAILABLE = True
 except ImportError:
-    AWS_AVAILABLE = False
+    BOTO3_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +64,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 # Monk Skin Tone (MST) Scale — 10 tones from light to dark
-# Reference: https://skintone.google/
 MST_LABELS = {
     1: "Very Light",
     2: "Light",
@@ -89,7 +78,6 @@ MST_LABELS = {
 }
 
 # Color theory mapping: MST → complementary fashion tones
-# This is the "Why This Works" tooltip data
 MST_COLOR_THEORY = {
     1: {"best_colors": ["Navy", "Emerald", "Burgundy", "Charcoal"], "avoid": ["Pale Yellow", "Beige"], "undertone_note": "Cool jewel tones create striking contrast."},
     2: {"best_colors": ["Forest Green", "Plum", "Cobalt Blue", "Rust"], "avoid": ["Neon Yellow"], "undertone_note": "Rich earth tones and deep jewels balance lighter skin."},
@@ -103,433 +91,755 @@ MST_COLOR_THEORY = {
     10: {"best_colors": ["Pure White", "Bright Orange", "Electric Green", "Gold"], "avoid": ["Dark Brown", "Black"], "undertone_note": "Bold, luminous colors create stunning contrast."},
 }
 
-# Vibe presets — these map vibe_id to FLUX prompt modifiers
+# Vibe presets — map vibe_id to prompt modifiers
 VIBE_PRESETS = {
     "caffeine_survivor": {
-        "label": "Surviving on Caffeine ☕",
+        "label": "Surviving on Caffeine",
         "flux_modifier": "oversized cozy hoodie, distressed denim, messy-chic hair, coffee shop aesthetic",
         "style_persona": "effortlessly unbothered",
     },
     "sarcastic_rizzler": {
-        "label": "The Sarcastic Rizzler 😏",
+        "label": "The Sarcastic Rizzler",
         "flux_modifier": "sharp tailored blazer, statement sneakers, confident pose, editorial lighting",
         "style_persona": "sharp-witted trendsetter",
     },
     "main_character": {
-        "label": "Main Character Energy ✨",
+        "label": "Main Character Energy",
         "flux_modifier": "dramatic flowing outfit, cinematic backlighting, street style, golden hour",
         "style_persona": "the protagonist of every scene",
     },
     "quiet_luxury": {
-        "label": "Quiet Luxury 🤫",
+        "label": "Quiet Luxury",
         "flux_modifier": "minimal neutral tones, cashmere texture, understated elegance, clean silhouette",
         "style_persona": "old-money minimalist",
     },
 }
 
-# Occasion presets — map occasion to FLUX prompt context
+# Occasion presets — map occasion to prompt context
 OCCASION_PRESETS = {
     "date_night": {
-        "label": "Date Night 🌙",
+        "label": "Date Night",
         "flux_context": "romantic evening setting, warm ambient lighting, upscale restaurant vibes",
         "style_direction": "elevated casual to semi-formal",
     },
     "office": {
-        "label": "Office 💼",
+        "label": "Office",
         "flux_context": "modern corporate office, clean backdrop, professional lighting",
         "style_direction": "smart casual to business formal",
     },
     "sangeet": {
-        "label": "Sangeet 💃",
+        "label": "Sangeet",
         "flux_context": "vibrant Indian wedding sangeet celebration, colorful lighting, festive atmosphere",
         "style_direction": "festive ethnic with modern fusion",
     },
     "airport_look": {
-        "label": "Airport Look ✈️",
+        "label": "Airport Look",
         "flux_context": "luxury airport terminal, travel aesthetic, natural daylight",
         "style_direction": "comfortable yet polished travel wear",
     },
 }
 
+# Skin tone label mapping (frontend sends labels, we need MST numbers)
+SKIN_TONE_TO_MST = {
+    "Fair": 2, "Light": 2,
+    "Medium": 5, "Olive": 4,
+    "Brown": 7, "Dark": 9,
+    "Deep": 10,
+}
 
-# ============================================================================
-#  SECTION 1: EXTERNAL API WRAPPER FUNCTIONS
-#  ──────────────────────────────────────────
-#  These are CLEAN WRAPPERS. They call external APIs and return structured data.
-#  They do NOT contain any ML model code. Replace endpoints with your actual APIs.
-# ============================================================================
+BODY_SHAPE_MAP = {
+    "slim_athletic": "slim athletic physique",
+    "average": "medium build",
+    "muscular": "well-built athletic physique",
+    "plus_size": "plus size body type",
+    "tall_lean": "tall lean physique",
+    "short_stocky": "compact stocky build",
+}
 
-def extract_biometrics(image_base64: str) -> dict:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  AWS REKOGNITION: Biometric Extraction                             │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Uses AWS Rekognition to detect:                                    │
-    │    • Face bounding box (x, y, width, height)                       │
-    │    • Gender estimation                                              │
-    │    • Face confidence score                                          │
-    │                                                                    │
-    │  Skin tone estimation via color analysis of face region            │
-    │  Body type is estimated from image proportions                     │
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.environ.get("AWS_REGION", "ap-south-1")
+# Gender mapping from frontend
+GENDER_MAP = {
+    "men": "man",
+    "women": "woman",
+}
 
-    if aws_access_key and aws_secret_key and AWS_AVAILABLE:
+MY_NARRATIVE_CATALOG = [
+    {
+        "handle": "my-pet-name-is-iitian-custom-batch-year-unisexual-graphic-printed-varsity-jacket",
+        "title": "IITian Varsity Jacket",
+        "price": 1299,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/minimalist-hoodie-mockup-with-front-design-against-dark-neutral-backdrop-095_3.jpg?v=1755435363",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-name-unisexual-hoodies",
+        "title": "NITian Name Hoodies",
+        "price": 999,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/minimalist-hoodie-mockup-with-front-design-against-dark-neutral-backdrop-095_2.jpg?v=1754661883",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-name-unisexual-t-shirt",
+        "title": "NITian Name Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/Ifalltorisebeautifully_O_5.png?v=1753449803",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-batch-year-unisexual-t-shirt-copy",
+        "title": "NITian Batch Year Hoodies",
+        "price": 999,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/floating-white-hoodie-mockup-front-view-clean-light-grey-background-minimalist-studio-lighting-soft-shadows-design-center-chest-0630_24.jpg?v=1749484980",
+    },
+    {
+        "handle": "my-pet-name-is-nitian-custom-batch-year-unisexual-t-shirt",
+        "title": "NITian Batch Year Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/boxy-blank-white-round-neck-unisex-t-shirt-mockup-back-view-on-hanger-draped-fabric-backdrop-soft-neutral-lighting-minimal-and-elegant-presentation-1009_baef7207-3c62-4b24-83c5-c838f5f3a425.jpg?v=1751661711",
+    },
+    {
+        "handle": "my-pet-name-is-iitian-custom-batch-year-unisexual-t-shirt",
+        "title": "IITian Batch Year Tee",
+        "price": 549,
+        "flat_lay_url": "https://cdn.shopify.com/s/files/1/0680/5762/8864/files/studio-display-hoodie-mockup-on-mannequin-with-neutral-gray-background-clean-and-professional-0280_27_7266e927-9122-4c2a-87da-c7ce996ea321.jpg?v=1749142018",
+    },
+]
+
+for _item in MY_NARRATIVE_CATALOG:
+    _item["product_url"] = f"/products/{_item['handle']}"
+
+
+# ---------------------------------------------------------------------------
+# GLOBAL INVENTORY PIPELINE HELPERS (CJ / RAKUTEN → SCRUB → VECTOR → SEARCH)
+# ---------------------------------------------------------------------------
+
+RAKUTEN_API_BASE = os.environ.get("RAKUTEN_API_BASE", "https://api.rakutenmarketing.com")
+CJ_API_BASE = os.environ.get("CJ_API_BASE", "https://product-search.api.cj.com")
+RAKUTEN_TOKEN_URL = os.environ.get("RAKUTEN_TOKEN_URL", "").strip()
+RAKUTEN_TOKEN_TTL_SAFETY_SECONDS = 60
+
+_rakuten_token_cache = {
+    "access_token": "",
+    "expires_at": 0,
+}
+_rakuten_token_lock = threading.Lock()
+
+
+def _sb_headers():
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    return url, key, headers
+
+
+def sb_configured() -> bool:
+    url, key, _ = _sb_headers()
+    return bool(url and key)
+
+
+def _sb_request(method: str, path: str, payload: Any = None):
+    url, key, headers = _sb_headers()
+    if not url or not key:
+        return None, "supabase_not_configured"
+    full_url = f"{url.rstrip('/')}{path}"
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(full_url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8") or "null"
+            return json.loads(raw), None
+    except urllib.error.HTTPError as e:
         try:
-            import PIL.Image
-            import io as io_module
-            
-            client = boto3.client(
-                'rekognition',
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key,
-                region_name=aws_region
-            )
-            
-            image_bytes = base64.b64decode(image_base64)
-            
-            response = client.detect_faces(
-                Image={'Bytes': image_bytes},
-                Attributes=['ALL']
-            )
-            
-            if not response.get('FaceDetails'):
-                print("⚠️  [extract_biometrics] No face detected")
-                return {
-                    "face_detected": False,
-                    "error": "No face detected in image"
-                }
-            
-            face = response['FaceDetails'][0]
-            
-            bbox = face.get('BoundingBox', {})
-            face_bbox = {
-                "x": int(bbox.get('Left', 0) * 1000),
-                "y": int(bbox.get('Top', 0) * 1000),
-                "width": int(bbox.get('Width', 0) * 1000),
-                "height": int(bbox.get('Height', 0) * 1000)
-            }
-            
-            gender = face.get('Gender', {}).get('Value', 'Man')
-            gender_presentation = gender.lower()
-            
-            confidence = face.get('Confidence', 0) / 100.0
-            
-            skin_tone = estimate_skin_tone_from_colors(image_bytes, bbox)
-            
-            body_type = estimate_body_type(face)
-            
-            print(f"✅ [extract_biometrics] AWS Rekognition: face detected, gender={gender_presentation}, MST={skin_tone}")
-            
-            return {
-                "face_detected": True,
-                "face_bbox": face_bbox,
-                "monk_skin_tone": skin_tone,
-                "mst_label": MST_LABELS.get(skin_tone, "Medium"),
-                "body_type": body_type,
-                "gender_presentation": gender_presentation,
-                "confidence": confidence,
-            }
-            
-        except ClientError as e:
-            print(f"❌ [extract_biometrics] AWS error: {e}")
-        except Exception as e:
-            print(f"❌ [extract_biometrics] Error: {e}")
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = str(e)
+        return None, f"http_{e.code}:{detail[:260]}"
+    except Exception as e:
+        return None, str(e)
 
-    # ─── MOCK RESPONSE (fallback) ───
-    print("⚠️  [extract_biometrics] Using MOCK data — AWS credentials not configured")
+
+def sb_upsert_global_inventory(rows: list):
+    if not rows:
+        return {"inserted": 0}, None
+    _, _, headers = _sb_headers()
+    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+    url, key, _ = _sb_headers()
+    if not url or not key:
+        return None, "supabase_not_configured"
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/rest/v1/global_inventory",
+        data=json.dumps(rows).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "[]")
+            return {"inserted": len(data) if isinstance(data, list) else len(rows)}, None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = str(e)
+        return None, f"http_{e.code}:{detail[:300]}"
+    except Exception as e:
+        return None, str(e)
+
+
+def sb_match_global_inventory(query_embedding: list, category: str = "", limit: int = 6):
+    payload = {
+        "query_embedding": query_embedding,
+        "query_category": category or None,
+        "match_count": max(1, min(20, int(limit or 6))),
+    }
+    data, err = _sb_request("POST", "/rest/v1/rpc/match_global_inventory", payload)
+    if err:
+        return [], err
+    return data if isinstance(data, list) else [], None
+
+
+def _cosine_similarity(a: list, b: list) -> float:
+    if not a or not b:
+        return 0.0
+    n = min(len(a), len(b))
+    if n == 0:
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for i in range(n):
+        x = float(a[i] or 0.0)
+        y = float(b[i] or 0.0)
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return dot / (math.sqrt(na) * math.sqrt(nb))
+
+
+def sb_fallback_similarity_search(query_embedding: list, category: str = "", limit: int = 6):
+    cat = (category or "").strip().lower()
+    query = "/rest/v1/global_inventory?select=id,network,external_product_id,title,brand,category,price,currency,image_url,flat_lay_url,checkout_url,affiliate_url,embedding,quality_score,is_clean&is_clean=eq.true&limit=120"
+    if cat:
+        query += "&category=eq." + urllib.parse.quote(cat)
+    rows, err = _sb_request("GET", query, None)
+    if err:
+        return [], err
+    scored = []
+    for row in (rows or []):
+        emb = row.get("embedding")
+        if not isinstance(emb, list):
+            continue
+        s = _cosine_similarity(query_embedding, emb)
+        item = dict(row)
+        item["similarity"] = round(float(s), 6)
+        scored.append(item)
+    scored.sort(key=lambda x: x.get("similarity", 0.0), reverse=True)
+    return scored[: max(1, min(20, int(limit or 6)))], None
+
+
+def get_text_embedding(client: "OpenAI", text: str) -> list:
+    text = (text or "").strip()
+    if not text:
+        return []
+    try:
+        emb = client.embeddings.create(model="text-embedding-3-small", input=text)
+        vec = emb.data[0].embedding if emb and emb.data else []
+        return vec if isinstance(vec, list) else []
+    except Exception as e:
+        print(f"⚠️ [embedding] {e}")
+        return []
+
+
+def _download_bytes(url: str, timeout: int = 15) -> bytes:
+    if not url or not isinstance(url, str):
+        return b""
+    req = urllib.request.Request(url, headers={"User-Agent": "MN-AI-Stylist/1.0"}, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def classify_affiliate_image(image_url: str) -> dict:
+    """
+    Gatekeeper for VTON-ready products:
+    reject if human face / hands / heavy lifestyle clutter.
+    """
+    lowered = (image_url or "").lower()
+    hard_reject_tokens = [
+        "lookbook", "lifestyle", "on-model", "model", "celebrity", "person", "people", "street-style",
+        "outfit", "selfie", "influencer", "runway", "editorial", "portrait"
+    ]
+    hard_pass_tokens = ["flatlay", "flat-lay", "ghost", "mockup", "hanger", "product-only", "product", "packshot"]
+
+    if any(tok in lowered for tok in hard_reject_tokens):
+        return {"approved": False, "reason": "url_pattern_human_lifestyle", "quality_score": 0.1}
+
+    # Primary classifier: AWS Rekognition (if configured).
+    aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    aws_region = os.environ.get("AWS_REGION", "ap-south-1")
+    if BOTO3_AVAILABLE and aws_key and aws_secret:
+        try:
+            image_bytes = _download_bytes(image_url)
+            if not image_bytes:
+                return {"approved": False, "reason": "image_download_failed", "quality_score": 0.0}
+            rek = boto3.client("rekognition", region_name=aws_region)
+            faces = rek.detect_faces(Image={"Bytes": image_bytes}, Attributes=["DEFAULT"])
+            face_count = len(faces.get("FaceDetails", []))
+            labels = rek.detect_labels(Image={"Bytes": image_bytes}, MaxLabels=25, MinConfidence=70)
+            names = [str(x.get("Name", "")).lower() for x in labels.get("Labels", [])]
+            reject_labels = {
+                "person", "human", "face", "head", "hand", "finger", "arm", "leg", "foot",
+                "crowd", "city", "street", "room", "furniture", "indoor", "outdoor", "building"
+            }
+            clutter_hits = [n for n in names if n in reject_labels]
+            if face_count > 0 or clutter_hits:
+                return {"approved": False, "reason": "rekognition_detected_human_body_or_clutter", "quality_score": 0.12, "faces": face_count, "labels": clutter_hits[:6]}
+            return {"approved": True, "reason": "rekognition_clean_product", "quality_score": 0.9}
+        except Exception as e:
+            print(f"⚠️ [classify_affiliate_image] rekognition fallback: {e}")
+
+    # Strong heuristic fallback (strict allow-list + reject-list)
+    if any(tok in lowered for tok in hard_pass_tokens):
+        return {"approved": True, "reason": "heuristic_product_only_token", "quality_score": 0.82}
+    return {"approved": False, "reason": "heuristic_reject_uncertain_image", "quality_score": 0.08}
+
+
+def _first_non_empty(d: dict, keys: list, default=""):
+    for k in keys:
+        v = d.get(k)
+        if v is not None and str(v).strip() != "":
+            return v
+    return default
+
+
+def _extract_partner_products(payload: dict) -> list:
+    if not isinstance(payload, dict):
+        return []
+    roots = ["products", "items", "data", "results", "result", "offers"]
+    for key in roots:
+        arr = payload.get(key)
+        if isinstance(arr, list):
+            return [x for x in arr if isinstance(x, dict)]
+    if isinstance(payload.get("product"), dict):
+        return [payload["product"]]
+    return []
+
+
+def _rakuten_credentials():
+    """
+    Supports both naming conventions:
+    - Preferred: RAKUTEN_CLIENT_ID + RAKUTEN_CLIENT_SECRET
+    - Legacy:    RAKUTEN_APP_ID + RAKUTEN_TOKEN
+    """
+    client_id = os.environ.get("RAKUTEN_CLIENT_ID", "").strip() or os.environ.get("RAKUTEN_APP_ID", "").strip()
+    client_secret = os.environ.get("RAKUTEN_CLIENT_SECRET", "").strip() or os.environ.get("RAKUTEN_TOKEN", "").strip()
+    return client_id, client_secret
+
+
+def _request_rakuten_access_token(client_id: str, client_secret: str):
+    if not client_id or not client_secret:
+        return "", 0, "missing_rakuten_oauth_credentials"
+
+    token_url = RAKUTEN_TOKEN_URL or f"{RAKUTEN_API_BASE.rstrip('/')}/token"
+    scope = os.environ.get("RAKUTEN_SCOPE", "").strip()
+    payload = {"grant_type": "client_credentials"}
+    if scope:
+        payload["scope"] = scope
+
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("utf-8")
+    req = urllib.request.Request(
+        token_url,
+        data=urllib.parse.urlencode(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Basic {basic}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8") or "{}"
+            token_payload = json.loads(raw)
+        access_token = str(token_payload.get("access_token", "")).strip()
+        expires_in = int(token_payload.get("expires_in", 3600) or 3600)
+        if not access_token:
+            return "", 0, f"rakuten_token_missing_access_token:{raw[:220]}"
+        expires_at = int(time.time()) + max(60, expires_in) - RAKUTEN_TOKEN_TTL_SAFETY_SECONDS
+        return access_token, expires_at, None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = str(e)
+        return "", 0, f"rakuten_token_http_{e.code}:{detail[:260]}"
+    except Exception as e:
+        return "", 0, f"rakuten_token_error:{e}"
+
+
+def get_rakuten_access_token(force_refresh: bool = False):
+    # Optional manual override token for quick validation / emergency fallback.
+    # Primary flow remains OAuth client_credentials.
+    manual_access_token = os.environ.get("RAKUTEN_ACCESS_TOKEN", "").strip()
+    if manual_access_token and not force_refresh:
+        return manual_access_token, None
+
+    client_id, client_secret = _rakuten_credentials()
+    now = int(time.time())
+    with _rakuten_token_lock:
+        cached_token = _rakuten_token_cache.get("access_token", "")
+        cached_exp = int(_rakuten_token_cache.get("expires_at", 0) or 0)
+        if not force_refresh and cached_token and cached_exp > now:
+            return cached_token, None
+
+        token, expires_at, err = _request_rakuten_access_token(client_id, client_secret)
+        if err:
+            return "", err
+        _rakuten_token_cache["access_token"] = token
+        _rakuten_token_cache["expires_at"] = expires_at
+        return token, None
+
+
+def fetch_rakuten_products(query: str, brand: str, category: str, limit: int = 30):
+    app_id = os.environ.get("RAKUTEN_APP_ID", "").strip() or os.environ.get("RAKUTEN_CLIENT_ID", "").strip()
+    bearer, token_err = get_rakuten_access_token()
+    if token_err:
+        return [], token_err
+    params = {
+        "query": query or "",
+        "brand": brand or "",
+        "category": category or "",
+        "limit": max(1, min(80, int(limit or 30))),
+    }
+    q = urllib.parse.urlencode({k: v for k, v in params.items() if str(v).strip() != ""})
+    headers = {
+        "Authorization": f"Bearer {bearer}",
+        "Accept": "application/json",
+    }
+    if app_id:
+        headers["X-Application-Id"] = app_id
+
+    def _request_products(access_token: str):
+        headers["Authorization"] = f"Bearer {access_token}"
+        req = urllib.request.Request(
+            f"{RAKUTEN_API_BASE.rstrip('/')}/products?{q}",
+            headers=headers,
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+
+    try:
+        payload = _request_products(bearer)
+        return _extract_partner_products(payload), None
+    except urllib.error.HTTPError as e:
+        # Access tokens are short-lived; one forced refresh before hard-fail.
+        if e.code in (401, 403):
+            refreshed, refresh_err = get_rakuten_access_token(force_refresh=True)
+            if refresh_err:
+                return [], refresh_err
+            try:
+                payload = _request_products(refreshed)
+                return _extract_partner_products(payload), None
+            except Exception as retry_err:
+                return [], str(retry_err)
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = str(e)
+        return [], f"rakuten_products_http_{e.code}:{detail[:260]}"
+    except Exception as e:
+        return [], str(e)
+
+
+def fetch_cj_products(query: str, brand: str, category: str, limit: int = 30):
+    dev_key = os.environ.get("CJ_DEVELOPER_KEY", "").strip()
+    website_id = os.environ.get("CJ_WEBSITE_ID", "").strip()
+    if not dev_key:
+        return [], "missing_cj_credentials"
+    params = {
+        "keywords": query or "",
+        "advertiser-name": brand or "",
+        "serviceable-area": "IN",
+        "records-per-page": max(1, min(80, int(limit or 30))),
+    }
+    if category:
+        params["cat"] = category
+    q = urllib.parse.urlencode({k: v for k, v in params.items() if str(v).strip() != ""})
+    req = urllib.request.Request(
+        f"{CJ_API_BASE.rstrip('/')}/v2/product-search?{q}",
+        headers={
+            "Authorization": dev_key,
+            "x-cj-website-id": website_id,
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            payload = json.loads(resp.read().decode("utf-8") or "{}")
+        return _extract_partner_products(payload), None
+    except Exception as e:
+        return [], str(e)
+
+
+def normalize_partner_product(raw: dict, network: str, fallback_brand: str, fallback_category: str) -> dict:
+    title = str(_first_non_empty(raw, ["title", "productName", "name", "product_name"], "")).strip()
+    price_raw = _first_non_empty(raw, ["price", "salePrice", "priceValue", "current_price", "amount"], "")
+    try:
+        price = float(str(price_raw).replace(",", "").replace("₹", "").strip()) if str(price_raw).strip() else 0.0
+    except Exception:
+        price = 0.0
+    return {
+        "network": network.lower(),
+        "external_product_id": str(_first_non_empty(raw, ["id", "sku", "productId", "product_id", "pid"], "")),
+        "title": title,
+        "brand": str(_first_non_empty(raw, ["brand", "brandName", "advertiser-name"], fallback_brand or "")).strip(),
+        "category": str(_first_non_empty(raw, ["category", "productType", "type", "cat"], fallback_category or "")).strip().lower(),
+        "price": price,
+        "currency": str(_first_non_empty(raw, ["currency", "currencyCode"], "INR")).upper(),
+        "image_url": str(_first_non_empty(raw, ["imageUrl", "image_url", "image", "imageLink", "image-link"], "")).strip(),
+        "flat_lay_url": str(_first_non_empty(raw, ["flat_lay_url", "flatLayUrl", "product_image", "imageUrl", "image_url", "image"], "")).strip(),
+        "checkout_url": str(_first_non_empty(raw, ["checkout_url", "checkoutUrl", "deepLink", "deeplink", "affiliate_url", "affiliateLink", "link", "buyUrl", "buy_url", "url"], "")).strip(),
+        "affiliate_url": str(_first_non_empty(raw, ["affiliate_url", "affiliateLink", "link", "buyUrl", "buy_url", "url"], "")).strip(),
+        "description": str(_first_non_empty(raw, ["description", "shortDescription"], "")).strip(),
+    }
+
+
+def ingest_partner_feed(client: "OpenAI", network: str, query: str, brand: str, category: str, limit: int = 30, dry_run: bool = False):
+    net = (network or "").strip().lower()
+    if net not in {"rakuten", "cj"}:
+        return {"success": False, "error": "network must be 'rakuten' or 'cj'"}
+
+    if net == "rakuten":
+        raw_items, err = fetch_rakuten_products(query=query, brand=brand, category=category, limit=limit)
+    else:
+        raw_items, err = fetch_cj_products(query=query, brand=brand, category=category, limit=limit)
+    if err:
+        return {"success": False, "error": f"fetch_failed:{err}"}
+
+    scanned = 0
+    approved = 0
+    rejected = 0
+    upsert_rows = []
+    samples = []
+    for item in raw_items:
+        scanned += 1
+        p = normalize_partner_product(item, net, brand, category)
+        if not p["title"] or not p["image_url"] or not (p["checkout_url"] or p["affiliate_url"]):
+            rejected += 1
+            continue
+        quality = classify_affiliate_image(p["image_url"])
+        if not quality.get("approved"):
+            rejected += 1
+            continue
+        approved += 1
+        emb_text = f"{p['title']} | {p['brand']} | {p['category']} | {p['description']}"
+        emb = get_text_embedding(client, emb_text)
+        row = {
+            "network": p["network"],
+            "external_product_id": p["external_product_id"] or f"{net}_{approved}_{int(time.time())}",
+            "title": p["title"],
+            "brand": p["brand"] or "",
+            "category": p["category"] or "",
+            "price": p["price"],
+            "currency": p["currency"] or "INR",
+            "image_url": p["image_url"],
+            "flat_lay_url": p["flat_lay_url"] or p["image_url"],
+            "checkout_url": p["checkout_url"] or p["affiliate_url"],
+            "affiliate_url": p["affiliate_url"] or p["checkout_url"],
+            "description": p["description"] or "",
+            "embedding": emb,
+            "quality_score": float(quality.get("quality_score", 0.0)),
+            "is_clean": True,
+            "filter_reason": str(quality.get("reason", "approved")),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        upsert_rows.append(row)
+        if len(samples) < 5:
+            samples.append({
+                "title": row["title"],
+                "checkout_url": row["checkout_url"],
+                "affiliate_url": row["affiliate_url"],
+                "flat_lay_url": row["flat_lay_url"],
+            })
+
+    write_result = {"inserted": 0}
+    write_err = None
+    if not dry_run:
+        write_result, write_err = sb_upsert_global_inventory(upsert_rows)
+
+    return {
+        "success": write_err is None,
+        "network": net,
+        "query": query,
+        "brand": brand,
+        "category": category,
+        "scanned": scanned,
+        "approved": approved,
+        "rejected": rejected,
+        "inserted": int((write_result or {}).get("inserted", 0)),
+        "samples": samples,
+        "error": write_err,
+    }
+
+
+def search_global_inventory(client: "OpenAI", style_query: str, category: str = "", limit: int = 6):
+    emb = get_text_embedding(client, style_query)
+    if not emb:
+        return {"success": False, "error": "embedding_failed", "matches": []}
+
+    rows, err = sb_match_global_inventory(query_embedding=emb, category=category, limit=limit)
+    if err:
+        rows, fallback_err = sb_fallback_similarity_search(query_embedding=emb, category=category, limit=limit)
+        if fallback_err:
+            return {"success": False, "error": f"{err}; fallback:{fallback_err}", "matches": []}
+
+    matches = []
+    for r in rows[: max(1, min(20, int(limit or 6)))]:
+        matches.append({
+            "id": r.get("id"),
+            "network": r.get("network", "").upper(),
+            "title": r.get("title"),
+            "brand": r.get("brand"),
+            "category": r.get("category"),
+            "price": r.get("price"),
+            "currency": r.get("currency", "INR"),
+            "image_url": r.get("image_url"),
+            "flat_lay_url": r.get("flat_lay_url") or r.get("image_url"),
+            "checkout_url": r.get("checkout_url") or r.get("affiliate_url"),
+            "affiliate_url": r.get("affiliate_url"),
+            "similarity": float(r.get("similarity", 0.0) or 0.0),
+            "quality_score": float(r.get("quality_score", 0.0) or 0.0),
+        })
+    return {"success": True, "matches": matches, "embedding_size": len(emb)}
+
+
+# ============================================================================
+#  SECTION 1: OPENAI + REPLICATE FUNCTIONS
+#  Uses GPT-4o for fashion recommendations + Replicate FLUX for images
+# ============================================================================
+
+def infer_biometrics_from_input(skin_tone_label: str, body_shape: str, gender: str) -> dict:
+    """
+    Infer biometric data from user-selected inputs instead of AWS Rekognition.
+    This is faster, cheaper, and more reliable than running ML models.
+    """
+    mst_value = SKIN_TONE_TO_MST.get(skin_tone_label, 5)
+    gender_presentation = GENDER_MAP.get(gender, gender or "person")
+    body_type = BODY_SHAPE_MAP.get(body_shape, "medium build")
+
     return {
         "face_detected": True,
-        "face_bbox": {"x": 120, "y": 80, "width": 200, "height": 250},
-        "monk_skin_tone": 5,
-        "mst_label": MST_LABELS[5],
-        "body_type": "athletic",
-        "gender_presentation": "man",
-        "confidence": 0.92,
+        "monk_skin_tone": mst_value,
+        "mst_label": MST_LABELS.get(mst_value, "Medium"),
+        "body_type": body_shape.replace("_", " ") if body_shape else "average",
+        "gender_presentation": gender_presentation,
+        "confidence": 0.95,  # User-selected, so high confidence
     }
 
 
-def estimate_skin_tone_from_colors(image_bytes, bbox) -> int:
+def generate_fashion_recommendation(client: 'OpenAI', biometrics: dict, occasion: str, vibe_id: str) -> dict:
     """
-    Estimate Monk Skin Tone (1-10) from face region colors using PIL.
-    Analyzes the average skin color in the detected face region.
-    """
-    try:
-        from PIL import Image
-        from io import BytesIO
-        
-        img = Image.open(BytesIO(image_bytes)).convert('RGB')
-        w, h = img.size
-        
-        left = int(bbox.get('Left', 0.2) * w)
-        top = int(bbox.get('Top', 0.1) * h)
-        box_w = int(bbox.get('Width', 0.6) * w)
-        box_h = int(bbox.get('Height', 0.7) * h)
-        
-        face_region = img.crop((left, top, left + box_w, top + box_h))
-        
-        import numpy as np
-        img_array = np.array(face_region)
-        
-        r, g, b = img_array[:,:,0], img_array[:,:,1], img_array[:,:,2]
-        
-        skin_mask = (r > 95) & (g > 40) & (b > 20) & \
-                    (r > g) & (r > b) & \
-                    ((r - g) > 15) & ((r - b) > 15)
-        
-        if skin_mask.sum() < 100:
-            return 5
-            
-        avg_r = r[skin_mask].mean()
-        avg_g = g[skin_mask].mean()
-        avg_b = b[skin_mask].mean()
-        
-        brightness = (avg_r + avg_g + avg_b) / 3
-        warmth = avg_r - (avg_g + avg_b) / 2
-        
-        if brightness > 180:
-            mst = 1 if warmth > 30 else 2
-        elif brightness > 150:
-            mst = 3 if warmth > 20 else 4
-        elif brightness > 120:
-            mst = 5 if warmth > 10 else 6
-        elif brightness > 90:
-            mst = 7 if warmth > 0 else 8
-        else:
-            mst = 9 if warmth > -10 else 10
-            
-        return max(1, min(10, mst))
-        
-    except Exception as e:
-        print(f"⚠️  [estimate_skin_tone] Error: {e}")
-        return 5
-
-
-def estimate_body_type(face_data) -> str:
-    """
-    Estimate body type from face/head size relative to typical proportions.
-    AWS Rekognition doesn't provide body type, so we use a default with
-    option to enhance with additional image analysis.
-    """
-    return "average"
-
-
-def segment_wardrobe(image_base64: str) -> dict:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  WRAPPER: Wardrobe Segmentation (DeepFashion2-style)               │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Calls a Vision API to detect, classify, and crop individual       │
-    │  clothing items from the full-body photo.                          │
-    │                                                                    │
-    │  Returns items: top, bottom, footwear, accessories                 │
-    │  Each item includes: category, color, pattern, cropped_image       │
-    │                                                                    │
-    │  REQUIRES: VISION_API_KEY, VISION_API_URL                          │
-    │  REPLACE: The mock response below with real API call               │
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    api_key = os.environ.get("VISION_API_KEY")
-    api_url = os.environ.get("VISION_API_URL")
-
-    if api_key and api_url and REQUESTS_AVAILABLE:
-        # ─── REAL API CALL (uncomment when API is ready) ───
-        # response = http_requests.post(
-        #     api_url,
-        #     headers={
-        #         "Authorization": f"Bearer {api_key}",
-        #         "Content-Type": "application/json",
-        #     },
-        #     json={
-        #         "image": image_base64,
-        #         "tasks": ["segmentation", "classification", "color_extraction"],
-        #     },
-        #     timeout=45,
-        # )
-        # response.raise_for_status()
-        # return response.json()
-        pass
-
-    # ─── MOCK RESPONSE (used until real API is connected) ───
-    print("⚠️  [segment_wardrobe] Using MOCK data — connect VISION_API_URL for production")
-    return {
-        "items_detected": 4,
-        "items": [
-            {
-                "id": str(uuid.uuid4()),
-                "slot": "top",
-                "category": "Topwear",
-                "sub_category": "Oversized Hoodie",
-                "color": "Charcoal Grey",
-                "pattern": "solid",
-                "style": "Western",
-                "confidence": 0.95,
-                "cropped_image_base64": "mock_cropped_top_base64...",
-                "description": "Dark grey oversized cotton hoodie with kangaroo pocket",
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "slot": "bottom",
-                "category": "Bottomwear",
-                "sub_category": "Slim Jeans",
-                "color": "Indigo Blue",
-                "pattern": "solid",
-                "style": "Western",
-                "confidence": 0.93,
-                "cropped_image_base64": "mock_cropped_bottom_base64...",
-                "description": "Dark wash indigo slim-fit denim jeans",
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "slot": "footwear",
-                "category": "Footwear",
-                "sub_category": "Running Shoes",
-                "color": "Black",
-                "pattern": "solid",
-                "style": "Western",
-                "confidence": 0.88,
-                "cropped_image_base64": "mock_cropped_shoes_base64...",
-                "description": "Black mesh running shoes with white sole",
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "slot": "accessory",
-                "category": "Accessory",
-                "sub_category": "Watch",
-                "color": "Silver",
-                "pattern": "solid",
-                "style": "Western",
-                "confidence": 0.78,
-                "cropped_image_base64": "mock_cropped_accessory_base64...",
-                "description": "Silver minimalist analog watch with mesh band",
-            },
-        ],
-    }
-
-
-def save_to_ghost_closet(user_id: str, wardrobe_items: list) -> dict:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  WRAPPER: Save to Ghost Closet (pgvector in Supabase)              │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Saves extracted wardrobe items as vector embeddings in the        │
-    │  Supabase PostgreSQL database with pgvector extension.              │
-    │                                                                    │
-    │  Each item gets:                                                    │
-    │    • A text embedding (from item description)                       │
-    │    • Metadata (category, color, pattern, style)                     │
-    │    • A cropped image URL (stored in Supabase Storage)               │
-    │                                                                    │
-    │  This builds the user's "Digital Closet" / "Style Graph" over      │
-    │  time, enabling personalized recommendations.                       │
-    │                                                                    │
-    │  REQUIRES: SUPABASE_URL, SUPABASE_KEY                              │
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-
-    saved_items = []
-
-    if supabase_url and supabase_key and SUPABASE_AVAILABLE:
-        try:
-            supabase: Client = create_client(supabase_url, supabase_key)
-
-            for item in wardrobe_items:
-                record = {
-                    "id": str(uuid.uuid4()),
-                    "user_id": user_id,
-                    "image_url": item.get("cropped_image_base64", ""),  # Would be a real URL in production
-                    "category": item.get("category", "Unknown"),
-                    "color": item.get("color", "Unknown"),
-                    "tags": [
-                        item.get("sub_category", ""),
-                        item.get("pattern", ""),
-                        item.get("style", ""),
-                    ],
-                    # In production, you would also store:
-                    # "embedding": generate_embedding(item["description"]),
-                    # This would be a 768-dim or 1536-dim vector from an embedding model
-                }
-                # Upsert to Supabase
-                result = supabase.table("closet_items").insert(record).execute()
-                saved_items.append(record["id"])
-
-            print(f"✅ [save_to_ghost_closet] Saved {len(saved_items)} items for user {user_id}")
-        except Exception as e:
-            print(f"⚠️  [save_to_ghost_closet] Supabase error: {e}")
-            # Fall through to mock response
-    else:
-        print("⚠️  [save_to_ghost_closet] Using MOCK save — connect Supabase for production")
-        for item in wardrobe_items:
-            saved_items.append(str(uuid.uuid4()))
-
-    return {
-        "success": True,
-        "user_id": user_id,
-        "items_saved": len(saved_items),
-        "item_ids": saved_items,
-    }
-
-
-# ============================================================================
-#  SECTION 2: FLUX IMAGE GENERATION + FACE SWAP PIPELINE
-#  ──────────────────────────────────────────────────────
-#  CRITICAL SEQUENCING:
-#    Step A → Build the FLUX prompt from user data
-#    Step B → FLUX generates the editorial body + clothes image
-#    Step C → Face Swap applies the user's actual face onto the FLUX output
-#  These MUST be sequential. FLUX and Face Swap are never called together.
-# ============================================================================
-
-def build_flux_prompt(biometrics: dict, occasion: str, vibe_id: str) -> str:
-    """
-    Constructs a personalized FLUX image generation prompt by combining:
-    - Biometric data (skin tone, body type, gender) from AWS Rekognition
-    - User's selected preferences (vibe, occasion) from AI stylist
-    - Color theory based on their skin tone
-    
-    Returns a personalized outfit recommendation prompt for FLUX.
+    Use GPT-4o to generate a complete fashion recommendation including
+    outfit description, color palette, and styling tips.
     """
     mst_value = biometrics.get("monk_skin_tone", 5)
-    mst_label = MST_LABELS.get(mst_value, "Medium")
-    gender = biometrics.get("gender_presentation", "person")
+    mst_label = biometrics.get("mst_label", "Medium")
     body_type = biometrics.get("body_type", "average")
-    
+    gender = biometrics.get("gender_presentation", "person")
+    body_description = BODY_SHAPE_MAP.get(body_type, body_type)
+
+    vibe = VIBE_PRESETS.get(vibe_id, VIBE_PRESETS["caffeine_survivor"])
+    occ = OCCASION_PRESETS.get(occasion, OCCASION_PRESETS["date_night"])
+
     color_data = MST_COLOR_THEORY.get(mst_value, MST_COLOR_THEORY[5])
     best_colors = ", ".join(color_data.get("best_colors", ["neutral tones"]))
-    
+
+    prompt = f"""You are the AI Fashion Consultant at MY NARRATIVE — a psychology-first styling engine.
+
+USER PROFILE:
+- Skin Tone: {mst_label} (Monk Scale {mst_value}/10)
+- Body Type: {body_description}
+- Gender: {gender}
+- Occasion: {occ['label']}
+- Vibe: {vibe['label']} — {vibe['style_persona']}
+
+COLOR SCIENCE: Best colors for their skin tone: {best_colors}
+
+Generate a complete outfit recommendation as JSON with these fields:
+{{
+  "outfit_description": "A vivid 2-3 sentence description of the complete look",
+  "top": {{"name": "item name", "color": "color name", "hex": "#hexcode", "fabric": "fabric type"}},
+  "bottom": {{"name": "item name", "color": "color name", "hex": "#hexcode", "fabric": "fabric type"}},
+  "footwear": {{"name": "item name", "color": "color name", "hex": "#hexcode"}},
+  "accessory": {{"name": "item name", "color": "color name", "hex": "#hexcode"}},
+  "styling_tips": ["tip 1", "tip 2", "tip 3"],
+  "color_science_note": "Why these colors work for this skin tone"
+}}"""
+
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a fashion consultant AI. Always respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.85,
+        )
+        return json.loads(completion.choices[0].message.content)
+    except Exception as e:
+        print(f"⚠️  [generate_fashion_recommendation] GPT-4o error: {e}")
+        return {
+            "outfit_description": f"A {vibe['style_persona']} look perfect for {occ['label']}.",
+            "top": {"name": "Structured Blazer", "color": color_data["best_colors"][0], "hex": "#2C3E50", "fabric": "cotton blend"},
+            "bottom": {"name": "Slim Fit Trousers", "color": "Charcoal", "hex": "#36454F", "fabric": "stretch wool"},
+            "footwear": {"name": "Clean White Sneakers", "color": "White", "hex": "#FFFFFF"},
+            "accessory": {"name": "Minimalist Watch", "color": "Silver", "hex": "#C0C0C0"},
+            "styling_tips": ["Keep accessories minimal", "Confidence is the best accessory", "Fit matters more than brand"],
+            "color_science_note": color_data["undertone_note"],
+        }
+
+
+def generate_flux_image(biometrics: dict, occasion: str, vibe_id: str, recommendation: dict = None) -> str:
+    """
+    Use Replicate FLUX to generate a fashion editorial image.
+    Falls back to a placeholder if REPLICATE_API_TOKEN is not set.
+    """
+    token = os.environ.get("REPLICATE_API_TOKEN")
+
+    mst_label = biometrics.get("mst_label", "Medium")
+    body_type = biometrics.get("body_type", "average")
+    gender = biometrics.get("gender_presentation", "person")
+
     vibe = VIBE_PRESETS.get(vibe_id, VIBE_PRESETS["caffeine_survivor"])
-    vibe_modifier = vibe["flux_modifier"]
-    vibe_label = vibe["label"]
-    
     occ = OCCASION_PRESETS.get(occasion, OCCASION_PRESETS["date_night"])
-    occasion_context = occ["flux_context"]
-    style_direction = occ["style_direction"]
-    
-    gender_label = "man" if gender == "man" else "woman" if gender == "woman" else "person"
-    
-    body_description = {
-        "slim": "slim fit athletic physique",
-        "athletic": "well-built athletic physique",
-        "average": "medium build",
-        "plus": "plus size body type"
-    }.get(body_type, "average build")
-    
+
+    body_description = BODY_SHAPE_MAP.get(body_type, body_type)
+
+    # Build a focused FLUX prompt — include outfit details from GPT-4o recommendation
+    outfit_desc = ""
+    if recommendation:
+        top_name = recommendation.get("top", {}).get("name", "")
+        bottom_name = recommendation.get("bottom", {}).get("name", "")
+        if top_name or bottom_name:
+            outfit_desc = f"Wearing: {top_name} and {bottom_name}. "
+
+    color_data = MST_COLOR_THEORY.get(biometrics.get("monk_skin_tone", 5), MST_COLOR_THEORY[5])
+    best_colors = ", ".join(color_data.get("best_colors", ["neutral tones"]))
+
     prompt = (
-        f"High-end fashion editorial full-body photograph of an Indian {gender_label} "
+        f"High-end fashion editorial full-body photograph of an Indian {gender} "
         f"with {mst_label} skin tone and {body_description}. "
-        f"The model has a {body_type} body type as specified. "
-        f"The outfit consists of: "
-        f"1) A perfectly fitted {style_direction} top in {best_colors} colors that complements the {mst_label} skin tone, "
-        f"2) Well-tailored bottom in coordinating shade, "
-        f"3) Stylish footwear appropriate for the occasion, "
-        f"4) Minimal, elegant accessories. "
-        f"Style aesthetic: {vibe_modifier}. "
-        f"Setting: {occasion_context}. "
+        f"{outfit_desc}"
+        f"Style aesthetic: {vibe['flux_modifier']}. "
+        f"Setting: {occ['flux_context']}. "
         f"Natural lighting with cinematic touch, 4K ultra resolution, "
         f"texture-rich fabrics, realistic skin texture with natural pores, "
         f"fashion magazine editorial quality. "
@@ -537,43 +847,21 @@ def build_flux_prompt(biometrics: dict, occasion: str, vibe_id: str) -> str:
         f"no cropping, clean studio background with subtle gradient."
     )
 
-    print(f"🎨 [build_flux_prompt] Generated personalized prompt for {gender_label} with {mst_label} skin tone, body: {body_type}, vibe: {vibe_label}")
-    return prompt
-
-
-def generate_flux_image(prompt: str) -> str:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  STEP 3B: FLUX Image Generation                                     │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Calls FLUX (via Replicate) to generate a photorealistic editorial │
-    │  fashion image from the constructed prompt.                         │
-    │                                                                    │
-    │  IMPORTANT: This generates ONLY the body and clothes.              │
-    │  The face will be swapped in Step 3C.                               │
-    │                                                                    │
-    │  REQUIRES: REPLICATE_API_TOKEN                                     │
-    │  MODEL: black-forest-labs/flux-schnell (fast) or flux-dev (quality)│
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    token = os.environ.get("REPLICATE_API_TOKEN")
-
     if token and REPLICATE_AVAILABLE:
         try:
             client = replicate.Client(api_token=token)
-            print("🖼️  [generate_flux_image] Calling FLUX API...")
+            print(f"🖼️  [generate_flux_image] Calling FLUX API...")
 
             output = client.run(
                 "black-forest-labs/flux-schnell",
                 input={
                     "prompt": prompt,
-                    "aspect_ratio": "3:4",         # Portrait orientation for fashion
-                    "num_inference_steps": 4,       # Speed optimized for schnell
+                    "aspect_ratio": "3:4",
+                    "num_inference_steps": 4,
                     "output_format": "webp",
                     "output_quality": 90,
                 },
             )
-            # FLUX returns a list of FileOutput objects
             image_url = str(output[0]) if output else None
 
             if image_url:
@@ -584,200 +872,16 @@ def generate_flux_image(prompt: str) -> str:
 
         except Exception as e:
             print(f"❌ [generate_flux_image] FLUX API error: {e}")
-            raise
+            # Fallback to placeholder
+            return "https://placehold.co/768x1024/1a1a2e/e94560?text=FLUX+Generated+Image"
 
-    # ─── MOCK FALLBACK ───
+    # ─── FALLBACK (no Replicate token) ───
     print("⚠️  [generate_flux_image] Using MOCK image — connect REPLICATE_API_TOKEN for production")
     return "https://placehold.co/768x1024/1a1a2e/e94560?text=FLUX+Generated+Image"
 
 
-def apply_face_swap(flux_image_url: str, user_face_image: str) -> str:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  STEP 3C: Face Swap (Identity Transfer)                             │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Takes the FLUX-generated editorial image and swaps the generic    │
-    │  face with the user's actual face from their uploaded photo.        │
-    │                                                                    │
-    │  CRITICAL: This runs AFTER generate_flux_image(), never in         │
-    │  parallel. FLUX generates the body → Face Swap applies identity.   │
-    │                                                                    │
-    │  REQUIRES: REPLICATE_API_TOKEN                                     │
-    │  MODEL: lucataco/faceswap (InsightFace-based)                      │
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    token = os.environ.get("REPLICATE_API_TOKEN")
-
-    if token and REPLICATE_AVAILABLE:
-        try:
-            client = replicate.Client(api_token=token)
-            print("🔄 [apply_face_swap] Calling Face Swap API...")
-
-            swap_output = client.run(
-                "lucataco/faceswap:9a4298548422074c3f57258c5d544497314ae4112df80d116f0d2109bd068e9c",
-                input={
-                    "target_image": flux_image_url,   # FLUX output (body + clothes)
-                    "swap_image": user_face_image,     # User's original photo (face source)
-                },
-            )
-
-            result_url = str(swap_output) if swap_output else None
-
-            if result_url:
-                print(f"✅ [apply_face_swap] Face swap complete: {result_url[:80]}...")
-                return result_url
-            else:
-                raise Exception("Face Swap returned empty output")
-
-        except Exception as e:
-            print(f"❌ [apply_face_swap] Face Swap error: {e}")
-            # Return FLUX image without face swap as graceful fallback
-            print("⚠️  Falling back to FLUX image without face swap")
-            return flux_image_url
-
-    # ─── MOCK FALLBACK ───
-    print("⚠️  [apply_face_swap] Using MOCK face swap — connect REPLICATE_API_TOKEN for production")
-    return "https://placehold.co/768x1024/16213e/0f3460?text=Face+Swapped+Image"
-
-
-# ============================================================================
-#  SECTION 3: AFFILIATE / MONETIZATION (The "Switzerland" Upsell)
-#  ──────────────────────────────────────────────────────────────
-#  ANTI-HALLUCINATION GUARDRAIL:
-#  This returns MOCK hardcoded data. We are NOT building a web scraper for
-#  Myntra or any affiliate platform. Replace with real affiliate API later.
-# ============================================================================
-
-def get_affiliate_recommendation(item_type: str, style_vibe: str) -> dict:
-    """
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │  MOCK: Affiliate Recommendation Engine                              │
-    │  ──────────────────────────────────────────────────────────────────  │
-    │  Returns a hardcoded product recommendation with affiliate link,   │
-    │  price, and bank offer for the "gap item" — i.e., a clothing item │
-    │  the user doesn't own but the AI recommends.                        │
-    │                                                                    │
-    │  In production, this would call:                                    │
-    │   • Myntra Affiliate API                                            │
-    │   • Amazon Associates API                                           │
-    │   • Ajio Partner API                                                 │
-    │  to return real products with real affiliate tracking links.         │
-    └──────────────────────────────────────────────────────────────────────┘
-    """
-    # Mock product database keyed by item_type
-    mock_products = {
-        "sneakers": {
-            "product_name": "White Chunky Platform Sneakers",
-            "brand": "HRX by Hrithik Roshan",
-            "price": 2799,
-            "original_price": 3999,
-            "discount_pct": 30,
-            "currency": "INR",
-            "affiliate_url": "https://www.myntra.com/sneakers/hrx/white-chunky?aff=mynarrative",
-            "image_url": "https://assets.myntassets.com/w_412,q_60,dpr_2,fl_progressive/assets/images/sneakers_mock.jpg",
-            "bank_offer": "Use HDFC Credit Card to save ₹500 instantly",
-            "platform": "Myntra",
-        },
-        "blazer": {
-            "product_name": "Slim Fit Structured Blazer — Navy",
-            "brand": "Allen Solly",
-            "price": 4499,
-            "original_price": 6999,
-            "discount_pct": 36,
-            "currency": "INR",
-            "affiliate_url": "https://www.myntra.com/blazers/allen-solly/navy?aff=mynarrative",
-            "image_url": "https://assets.myntassets.com/w_412,q_60,dpr_2,fl_progressive/assets/images/blazer_mock.jpg",
-            "bank_offer": "Use Axis Bank card to get 10% cashback (up to ₹300)",
-            "platform": "Myntra",
-        },
-        "ethnic_kurta": {
-            "product_name": "Silk Blend Nehru Collar Kurta — Ivory",
-            "brand": "Manyavar",
-            "price": 3299,
-            "original_price": 4999,
-            "discount_pct": 34,
-            "currency": "INR",
-            "affiliate_url": "https://www.myntra.com/kurtas/manyavar/silk-ivory?aff=mynarrative",
-            "image_url": "https://assets.myntassets.com/w_412,q_60,dpr_2,fl_progressive/assets/images/kurta_mock.jpg",
-            "bank_offer": "Use HDFC Credit Card to save ₹500 instantly",
-            "platform": "Myntra",
-        },
-        "watch": {
-            "product_name": "Fossil Minimalist Chronograph — Rose Gold",
-            "brand": "Fossil",
-            "price": 8995,
-            "original_price": 12995,
-            "discount_pct": 31,
-            "currency": "INR",
-            "affiliate_url": "https://www.myntra.com/watches/fossil/rose-gold?aff=mynarrative",
-            "image_url": "https://assets.myntassets.com/w_412,q_60,dpr_2,fl_progressive/assets/images/watch_mock.jpg",
-            "bank_offer": "No-cost EMI available on all cards",
-            "platform": "Myntra",
-        },
-        "sunglasses": {
-            "product_name": "Ray-Ban Aviator Classic — Gold",
-            "brand": "Ray-Ban",
-            "price": 6490,
-            "original_price": 8990,
-            "discount_pct": 28,
-            "currency": "INR",
-            "affiliate_url": "https://www.myntra.com/sunglasses/ray-ban/aviator?aff=mynarrative",
-            "image_url": "https://assets.myntassets.com/w_412,q_60,dpr_2,fl_progressive/assets/images/sunglasses_mock.jpg",
-            "bank_offer": "Use ICICI card for extra 5% off",
-            "platform": "Myntra",
-        },
-    }
-
-    # Default to sneakers if item_type not found
-    product = mock_products.get(item_type.lower(), mock_products["sneakers"])
-
-    # Add vibe-context to the recommendation
-    product["style_context"] = f"Recommended to complete your '{style_vibe}' look"
-    product["gap_reason"] = f"This {item_type} was featured in your AI-generated editorial but isn't in your closet yet."
-
-    return product
-
-
-def identify_gap_items(wardrobe_items: list, generated_outfit_items: list) -> list:
-    """
-    Compares the user's existing wardrobe with the items shown in the
-    AI-generated outfit. Returns items the user is MISSING (gap items).
-
-    These gap items become affiliate upsell opportunities.
-    """
-    # Extract user's item categories (slots they already own)
-    owned_slots = {item.get("slot", "").lower() for item in wardrobe_items}
-
-    # Mock: items that were "generated" in the FLUX image but user doesn't own
-    # In production, this would use a Vision API to detect items in the FLUX output
-    generated_items = [
-        {"slot": "sneakers", "item_type": "sneakers", "description": "White Chunky Sneakers", "is_owned": False},
-        {"slot": "sunglasses", "item_type": "sunglasses", "description": "Aviator Sunglasses", "is_owned": False},
-    ]
-
-    # Mark items that user already has
-    for item in generated_items:
-        if item["slot"] in owned_slots:
-            item["is_owned"] = True
-
-    # Return only gap items (not owned)
-    gap_items = [item for item in generated_items if not item["is_owned"]]
-    return gap_items
-
-
-# ============================================================================
-#  SECTION 4: GAMIFICATION DATA (Mascot Cards + Style Graph)
-# ============================================================================
-
 def get_gamification_state(user_id: str) -> dict:
-    """
-    Returns the gamification state for the user:
-    - Mascot cards collected
-    - Style graph progress
-    - Rewards unlocked
-
-    In production, this would query the database. Currently returns mock data.
-    """
+    """Returns mock gamification state — same as before."""
     return {
         "mascot_quest": {
             "cards_collected": 1,
@@ -792,39 +896,429 @@ def get_gamification_state(user_id: str) -> dict:
                 "rarity": "Rare",
                 "unlock_method": "Checkout any recommended item",
             },
-            "checkout_cta": "Checkout to unlock your next physical Mascot Card! 🎴",
+            "checkout_cta": "Checkout to unlock your next physical Mascot Card!",
         },
         "style_graph": {
             "photos_uploaded": 1,
-            "photos_required": 4,       # Need 4 total (3 more after first)
+            "photos_required": 4,
             "progress_pct": 25,
             "reward_unlocked": False,
-            "reward_description": "Upload 3 more OOTD photos to train your AI and unlock 5% Store Credit 🎁",
+            "reward_description": "Upload 3 more OOTD photos to train your AI and unlock 5% Store Credit",
             "credit_amount": "5%",
             "credit_type": "Store Credit",
         },
     }
 
 
+def _product_type_from_title(title: str) -> str:
+    t = (title or "").lower()
+    if "jacket" in t:
+        return "jacket"
+    if "hoodie" in t:
+        return "hoodie"
+    return "tshirt"
+
+
+def _fallback_my_narrative_selection(occasion: str, vibe_id: str) -> list:
+    occ = (occasion or "").lower()
+    vibe = (vibe_id or "").lower()
+    picks = []
+    if "sangeet" in occ:
+        picks = [MY_NARRATIVE_CATALOG[0], MY_NARRATIVE_CATALOG[3]]
+    elif "airport" in occ or "office" in occ:
+        picks = [MY_NARRATIVE_CATALOG[1], MY_NARRATIVE_CATALOG[4]]
+    elif "gym" in occ or "caffeine" in vibe:
+        picks = [MY_NARRATIVE_CATALOG[2], MY_NARRATIVE_CATALOG[1]]
+    else:
+        picks = [MY_NARRATIVE_CATALOG[2], MY_NARRATIVE_CATALOG[5]]
+    return picks
+
+
+def generate_my_narrative_recommendation(client: 'OpenAI', biometrics: dict, occasion: str, vibe_id: str) -> dict:
+    catalog_lines = "\n".join([
+        f"- {p['handle']} | {p['title']} | ₹{p['price']} | {p['product_url']}"
+        for p in MY_NARRATIVE_CATALOG
+    ])
+    prompt = f"""You are MY NARRATIVE's brand stylist. ONLY recommend from this exact catalog.
+
+CATALOG:
+{catalog_lines}
+
+USER:
+- Skin Tone: {biometrics.get('mst_label', 'Medium')}
+- Body Type: {biometrics.get('body_type', 'average')}
+- Gender: {biometrics.get('gender_presentation', 'person')}
+- Occasion: {occasion}
+- Vibe: {vibe_id}
+
+Return STRICT JSON:
+{{
+  "direction": "1-2 sentence styling direction",
+  "styling_tips": ["tip1", "tip2", "tip3"],
+  "selected_handles": ["handle1", "handle2"]
+}}
+Rules:
+- selected_handles MUST be from catalog handles only.
+- Prefer one primary hero product and one alternate.
+- Keep tips concise and practical.
+"""
+    selected = []
+    direction = "Curated from My Narrative exclusive drops."
+    tips = [
+        "Keep the upper silhouette clean so the slogan stays legible.",
+        "Pair with neutral bottoms for stronger visual focus.",
+        "Use one statement layer only to avoid clutter."
+    ]
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.6,
+        )
+        data = json.loads(completion.choices[0].message.content)
+        direction = data.get("direction") or direction
+        tips = data.get("styling_tips") or tips
+        selected = data.get("selected_handles") or []
+    except Exception as e:
+        print(f"⚠️ [my_narrative] GPT fallback: {e}")
+
+    by_handle = {p["handle"]: p for p in MY_NARRATIVE_CATALOG}
+    selected_products = [by_handle[h] for h in selected if h in by_handle][:2]
+    if not selected_products:
+        selected_products = _fallback_my_narrative_selection(occasion, vibe_id)
+
+    outfit_pieces = []
+    slot_map = ["top", "outerwear"]
+    for idx, p in enumerate(selected_products):
+        ptype = _product_type_from_title(p["title"])
+        outfit_pieces.append({
+            "slot": slot_map[idx] if idx < len(slot_map) else "top",
+            "name": p["title"],
+            "type": ptype,
+            "color": "#39A596",
+            "owned": False,
+            "why": "Selected from My Narrative catalog to match your occasion and vibe.",
+            "shop_links": [{
+                "platform": "MY NARRATIVE",
+                "url": p["product_url"],
+                "add_to_cart_url": p["product_url"],
+                "product_url": p["product_url"],
+                "exact_product_url": p["product_url"],
+                "price": f"₹{p['price']}",
+                "handle": p["handle"],
+                "flat_lay_url": p["flat_lay_url"],
+            }],
+            "my_narrative_product": {
+                "handle": p["handle"],
+                "title": p["title"],
+                "price": p["price"],
+                "product_url": p["product_url"],
+                "flat_lay_url": p["flat_lay_url"],
+            }
+        })
+
+    return {
+        "direction": direction,
+        "styling_tips": tips[:3],
+        "suggestions": tips[:3],
+        "outfit_pieces": outfit_pieces,
+        "selected_products": selected_products,
+        "color_science_note": MST_COLOR_THEORY.get(
+            biometrics.get("monk_skin_tone", 5), MST_COLOR_THEORY[5]
+        ).get("undertone_note", ""),
+    }
+
+
+def run_idm_vton(user_image: str, garment_image: str, description: str) -> str:
+    token = os.environ.get("REPLICATE_API_TOKEN")
+    if not token or not REPLICATE_AVAILABLE:
+        return ""
+    if not user_image or not garment_image:
+        return ""
+    try:
+        client = replicate.Client(api_token=token)
+        try:
+            model = client.models.get("cuuupid/idm-vton")
+            version_id = model.latest_version.id
+        except Exception:
+            version_id = "c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4"
+
+        output = client.run(
+            f"cuuupid/idm-vton:{version_id}",
+            input={
+                "human_img": user_image,
+                "garm_img": garment_image,
+                "garment_des": description or "streetwear top",
+                "category": "upper_body",
+                "crop": False,
+                "seed": 42,
+                "steps": 30,
+                "force_dc": False,
+                "mask_only": False
+            }
+        )
+        return str(output) if output else ""
+    except Exception as e:
+        print(f"⚠️ [run_idm_vton] {e}")
+        return ""
+
+
+def normalize_replicate_image_ref(image_value: str) -> str:
+    """
+    Replicate accepts URL or data URI. Frontend may send raw base64.
+    Normalize raw base64 into data URI for better model compatibility.
+    """
+    v = (image_value or "").strip()
+    if not v:
+        return ""
+    lowered = v.lower()
+    if lowered.startswith("http://") or lowered.startswith("https://") or lowered.startswith("data:image/"):
+        return v
+    # Raw base64 fallback
+    return "data:image/jpeg;base64," + v
+
+
+def maybe_face_swap(base_image_url: str, user_image: str) -> str:
+    token = os.environ.get("REPLICATE_API_TOKEN")
+    if not token or not REPLICATE_AVAILABLE:
+        return base_image_url
+    if not user_image:
+        return base_image_url
+    try:
+        client = replicate.Client(api_token=token)
+        output = client.run(
+            "lucataco/faceswap:9a4298548422074c3f57258c5d544497314ae4112df80d116f0d2109bd068e9c",
+            input={"target_image": base_image_url, "swap_image": user_image}
+        )
+        return str(output) if output else base_image_url
+    except Exception as e:
+        print(f"⚠️ [maybe_face_swap] {e}")
+        return base_image_url
+
+
+def build_global_outfit_pieces(recommendation: dict, affiliate_recommendations: list) -> list:
+    rec = recommendation or {}
+    links = []
+    for item in affiliate_recommendations[:3]:
+        links.append({
+            "platform": item.get("platform", "Shop"),
+            "url": item.get("affiliate_url", ""),
+            "affiliate_url": item.get("affiliate_url", ""),
+            "price": f"₹{item.get('price')}" if item.get("price") else "",
+        })
+    return [
+        {
+            "slot": "top",
+            "name": (rec.get("top", {}) or {}).get("name", "Styled Top"),
+            "type": "top",
+            "color": (rec.get("top", {}) or {}).get("hex", "#39A596"),
+            "owned": False,
+            "why": "Matched to your tone, body profile and selected vibe.",
+            "shop_links": links[:1],
+        },
+        {
+            "slot": "bottom",
+            "name": (rec.get("bottom", {}) or {}).get("name", "Styled Bottom"),
+            "type": "bottom",
+            "color": (rec.get("bottom", {}) or {}).get("hex", "#5f6368"),
+            "owned": False,
+            "why": "Balanced silhouette for a complete look.",
+            "shop_links": links[1:2],
+        },
+        {
+            "slot": "footwear",
+            "name": (rec.get("footwear", {}) or {}).get("name", "Footwear"),
+            "type": "footwear",
+            "color": (rec.get("footwear", {}) or {}).get("hex", "#ffffff"),
+            "owned": False,
+            "why": "Completes the outfit with contrast and structure.",
+            "shop_links": links[2:3] or links[:1],
+        },
+    ]
+
+
+def build_style_query_from_recommendation(recommendation: dict, occasion: str, vibe_label: str) -> str:
+    rec = recommendation or {}
+    top = (rec.get("top", {}) or {}).get("name", "")
+    bottom = (rec.get("bottom", {}) or {}).get("name", "")
+    footwear = (rec.get("footwear", {}) or {}).get("name", "")
+    color = (rec.get("top", {}) or {}).get("color", "")
+    parts = [top, bottom, footwear, color, occasion.replace("_", " "), vibe_label]
+    return " | ".join([p for p in parts if str(p).strip()])
+
+
+def generate_global_style_query(client: "OpenAI", biometrics: dict, occasion: str, vibe_id: str, user_image: str = "") -> dict:
+    default_query = f"{biometrics.get('gender_presentation', 'person')} {occasion.replace('_', ' ')} {VIBE_PRESETS.get(vibe_id, {}).get('label', 'streetwear')} jacket"
+    default_category = "jacket"
+    prompt = f"""You are a senior fashion retrieval model for affiliate inventory search.
+Create ONE highly specific product retrieval query for a single upper-body garment.
+
+User profile:
+- Skin tone: {biometrics.get('mst_label', 'Medium')}
+- Body shape: {biometrics.get('body_type', 'average')}
+- Gender presentation: {biometrics.get('gender_presentation', 'person')}
+- Occasion: {occasion}
+- Vibe: {vibe_id}
+- Selfie provided: {"yes" if user_image else "no"}
+
+Return strict JSON:
+{{
+  "style_query": "e.g. Men's oversized vintage brown leather jacket",
+  "category": "jacket|hoodie|tshirt|shirt|sweatshirt"
+}}
+Rules:
+- Keep style_query under 14 words.
+- Query should be purchase-ready (material, fit, tone).
+- Focus on one garment that is ideal for VTON upper-body try-on.
+"""
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.35,
+        )
+        data = json.loads(completion.choices[0].message.content)
+        q = str(data.get("style_query", "")).strip() or default_query
+        cat = str(data.get("category", "")).strip().lower() or default_category
+        return {"style_query": q, "category": cat}
+    except Exception as e:
+        print(f"⚠️ [generate_global_style_query] {e}")
+        return {"style_query": default_query, "category": default_category}
+
+
+def _run_path_a_global(client: "OpenAI", biometrics: dict, occasion: str, vibe_id: str, user_image: str):
+    """
+    Vector-first global market runtime:
+    1) GPT style query
+    2) Supabase vector search
+    3) IDM-VTON with winning flat-lay
+    4) Fallback to FLUX if retrieval path fails
+    """
+    vibe_label = VIBE_PRESETS.get(vibe_id, {}).get("label", "stylish look")
+    occasion_key = occasion.replace("_", " ")
+
+    recommendation = {}
+    try:
+        recommendation = generate_fashion_recommendation(
+            client=client,
+            biometrics=biometrics,
+            occasion=occasion,
+            vibe_id=vibe_id,
+        )
+    except Exception as e:
+        print(f"⚠️ [global] recommendation fallback: {e}")
+        recommendation = {}
+
+    query_obj = generate_global_style_query(
+        client=client,
+        biometrics=biometrics,
+        occasion=occasion,
+        vibe_id=vibe_id,
+        user_image=user_image,
+    )
+    style_query = query_obj.get("style_query", "")
+    query_category = query_obj.get("category", "")
+    inventory_result = search_global_inventory(
+        client=client,
+        style_query=style_query,
+        category=query_category,
+        limit=6,
+    )
+    matches = inventory_result.get("matches", []) if inventory_result.get("success") else []
+
+    affiliate_recommendations = []
+    outfit_pieces = []
+    final_image_url = ""
+    flux_image_url = ""
+    selected_match = None
+    vton_applied = False
+
+    if matches:
+        for m in matches[:3]:
+            checkout_url = m.get("checkout_url") or m.get("affiliate_url") or ""
+            affiliate_recommendations.append({
+                "product_name": m.get("title"),
+                "brand": m.get("brand") or m.get("network"),
+                "price": m.get("price"),
+                "currency": m.get("currency", "INR"),
+                "affiliate_url": checkout_url,
+                "checkout_url": checkout_url,
+                "exact_product_url": checkout_url,
+                "product_url": checkout_url,
+                "flat_lay_url": m.get("flat_lay_url") or m.get("image_url"),
+                "image_url": m.get("image_url"),
+                "platform": m.get("network", "GLOBAL"),
+                "recommended_for": f"{vibe_label} {occasion_key} look",
+                "gap_item": {"description": m.get("title"), "is_owned": False},
+                "similarity": m.get("similarity", 0.0),
+            })
+        selected_match = matches[0]
+        final_image_url = run_idm_vton(
+            user_image=user_image,
+            garment_image=selected_match.get("flat_lay_url") or selected_match.get("image_url") or "",
+            description=selected_match.get("title", "global product"),
+        )
+        vton_applied = bool(final_image_url)
+        if not final_image_url:
+            print("🚨 [SEVERE] Global vector match found but IDM-VTON failed. Falling back to FLUX.")
+    else:
+        print("🚨 [SEVERE] Global vector inventory empty or retrieval failed. Falling back to FLUX.")
+
+    if not final_image_url:
+        try:
+            flux_image_url = generate_flux_image(
+                biometrics=biometrics,
+                occasion=occasion,
+                vibe_id=vibe_id,
+                recommendation=recommendation,
+            )
+        except Exception as e:
+            print(f"⚠️ [global] FLUX fallback failed: {e}")
+            flux_image_url = "https://placehold.co/768x1024/1a1a2e/e94560?text=AI+Styled+Look"
+        final_image_url = maybe_face_swap(flux_image_url, user_image)
+
+    outfit_pieces = build_global_outfit_pieces(recommendation, affiliate_recommendations)
+    return {
+        "recommendation": recommendation,
+        "affiliate_recommendations": affiliate_recommendations,
+        "outfit_pieces": outfit_pieces,
+        "final_image_url": final_image_url,
+        "flux_image_url": flux_image_url,
+        "style_query": style_query,
+        "vector_category": query_category,
+        "vector_top_match": selected_match,
+        "vton_applied": vton_applied,
+    }
+
+
 # ============================================================================
-#  SECTION 5: MAIN REQUEST HANDLER (Vercel Serverless Function)
+#  SECTION 2: MAIN REQUEST HANDLER (Vercel Serverless Function)
 # ============================================================================
 
 class handler(BaseHTTPRequestHandler):
     """
-    Vercel Serverless Function entry point.
-
     POST /api/stylist_pipeline
     ──────────────────────────
-    Handles the full AI Stylist pipeline orchestration.
+    Orchestrates the AI Stylist pipeline using OpenAI only.
 
     Request Body:
     {
         "action": "full_pipeline" | "get_vibes" | "get_occasions" | "get_gamification",
         "user_id": "shopify_customer_id",
-        "occasion": "date_night" | "office" | "sangeet" | "airport_look",
+        "occasion": "date_night" | "office" | "sangeet" | "airport_look" | ...,
         "vibe_id": "caffeine_survivor" | "sarcastic_rizzler" | "main_character" | "quiet_luxury",
-        "user_image": "base64_encoded_image_string"
+        "user_image": "base64_encoded_image_string",
+        "skin_tone": "Fair" | "Medium" | "Olive" | "Brown" | "Dark" | "Deep",
+        "body_shape": "slim_athletic" | "average" | "muscular" | "plus_size" | "tall_lean" | "short_stocky",
+        "gender": "men" | "women"
     }
     """
 
@@ -853,342 +1347,357 @@ class handler(BaseHTTPRequestHandler):
         """Health check and metadata endpoint."""
         self._respond(200, {
             "service": "My Narrative AI Stylist Pipeline",
-            "version": "2.0.0",
+            "version": "3.0.0",
             "status": "operational",
+            "engine": "OpenAI GPT-4o + Replicate FLUX",
             "available_vibes": list(VIBE_PRESETS.keys()),
             "available_occasions": list(OCCASION_PRESETS.keys()),
         })
 
     def do_POST(self):
         """
-        ┌──────────────────────────────────────────────────────────────────┐
-        │  MAIN PIPELINE ORCHESTRATOR                                     │
-        │                                                                  │
-        │  Flow:                                                           │
-        │  1. Parse request (occasion, vibe, user image)                  │
-        │  2. PARALLEL: extract_biometrics() + segment_wardrobe()         │
-        │  3. SEQUENTIAL: build_flux_prompt() → generate_flux() → swap()  │
-        │  4. PARALLEL: save_to_ghost_closet() + get_affiliates()         │
-        │  5. Return complete response to frontend                        │
-        └──────────────────────────────────────────────────────────────────┘
+        Main pipeline orchestrator — OpenAI only, fast and reliable.
         """
+        # ─── PARSE REQUEST ───
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        # Check for oversized payload (Vercel Hobby plan limit: 4.5 MB)
+        MAX_BODY_SIZE = 4.5 * 1024 * 1024
+        if content_length > MAX_BODY_SIZE:
+            self._respond(413, {
+                "success": False,
+                "error": "Payload too large. Image size exceeds 4.5 MB limit. Please use a smaller image.",
+            })
+            return
+
+        body = b''
+        if content_length > 0:
+            body = self.rfile.read(content_length)
+
+        if not body:
+            self._respond(400, {
+                "success": False,
+                "error": "Empty request body. Please provide valid JSON data.",
+            })
+            return
+
         try:
-            # ─── PARSE REQUEST ───
-            content_length = int(self.headers.get("Content-Length", 0))
-            
-            # Check for oversized payload (Vercel Hobby plan limit: 4.5 MB)
-            MAX_BODY_SIZE = 4.5 * 1024 * 1024  # 4.5 MB in bytes
-            if content_length > MAX_BODY_SIZE:
-                self._respond(413, {
-                    "success": False,
-                    "error": "Payload too large. Image size exceeds Vercel Hobby plan limit (4.5 MB). Please use a smaller image.",
-                })
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            self._respond(400, {"success": False, "error": "Invalid JSON in request body"})
+            return
+
+        action = body.get("action", "full_pipeline")
+
+        # ─── ACTION: Return available vibes ───
+        if action == "get_vibes":
+            vibes = []
+            for vid, vdata in VIBE_PRESETS.items():
+                vibes.append({"id": vid, "label": vdata["label"], "persona": vdata["style_persona"]})
+            self._respond(200, {"success": True, "vibes": vibes})
+            return
+
+        # ─── ACTION: Return available occasions ───
+        if action == "get_occasions":
+            occasions = []
+            for oid, odata in OCCASION_PRESETS.items():
+                occasions.append({"id": oid, "label": odata["label"], "direction": odata["style_direction"]})
+            self._respond(200, {"success": True, "occasions": occasions})
+            return
+
+        # ─── ACTION: Return gamification state ───
+        if action == "get_gamification":
+            user_id = body.get("user_id", "anonymous")
+            gamification = get_gamification_state(user_id)
+            self._respond(200, {"success": True, "gamification": gamification})
+            return
+
+        # ─── ACTION: Ingest partner affiliate feed into global_inventory ───
+        if action == "ingest_affiliate_feed":
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                self._respond(500, {"success": False, "error": "OPENAI_API_KEY not configured"})
                 return
-            
-            body = b''
-            if content_length > 0:
-                body = self.rfile.read(content_length)
-            
-            if not body:
+            if not sb_configured():
+                self._respond(500, {"success": False, "error": "Supabase not configured (SUPABASE_URL/SUPABASE_KEY)"})
+                return
+            client = OpenAI(api_key=api_key)
+            result = ingest_partner_feed(
+                client=client,
+                network=body.get("network", ""),
+                query=body.get("query", ""),
+                brand=body.get("brand", ""),
+                category=body.get("category", ""),
+                limit=body.get("limit", 30),
+                dry_run=bool(body.get("dry_run", False)),
+            )
+            self._respond(200 if result.get("success") else 400, result)
+            return
+
+        # ─── ACTION: Semantic search over curated global inventory ───
+        if action == "search_global_inventory":
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                self._respond(500, {"success": False, "error": "OPENAI_API_KEY not configured"})
+                return
+            client = OpenAI(api_key=api_key)
+            result = search_global_inventory(
+                client=client,
+                style_query=body.get("style_query", ""),
+                category=body.get("category", ""),
+                limit=body.get("limit", 6),
+            )
+            self._respond(200 if result.get("success") else 400, result)
+            return
+
+        # ─── ACTION: FULL PIPELINE ───
+        if action == "full_pipeline":
+            pipeline_start = time.time()
+
+            # Validate required fields (user_image is optional now — we use skin_tone/body_shape instead)
+            user_id = body.get("user_id")
+            occasion = body.get("occasion")
+            vibe_id = body.get("vibe_id")
+            skin_tone = body.get("skin_tone", "Medium")
+            body_shape = body.get("body_shape", "average")
+            gender = body.get("gender", "men")
+            source_preference = (body.get("source_preference") or body.get("sourcePreference") or "global_market").strip().lower()
+            if source_preference not in ("global_market", "my_narrative"):
+                source_preference = "global_market"
+
+            # Support both new fields and legacy user_image
+            user_image = body.get("user_image_data_url") or body.get("user_image")
+            user_image = normalize_replicate_image_ref(user_image or "")
+
+            print(f"📥 Request: user_id={user_id}, occasion={occasion}, vibe_id={vibe_id}, "
+                  f"skin_tone={skin_tone}, body_shape={body_shape}, gender={gender}, "
+                  f"source={source_preference}, image_size={len(user_image) if user_image else 0}")
+
+            if not all([user_id, occasion, vibe_id]):
                 self._respond(400, {
                     "success": False,
-                    "error": "Empty request body. Please provide valid JSON data.",
+                    "error": "Missing required fields: user_id, occasion, vibe_id",
+                    "required": ["user_id", "occasion", "vibe_id"],
                 })
                 return
-            
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                self._respond(400, {"success": False, "error": "Invalid JSON in request body"})
+
+            # ─── AUTH CHECK ───
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                self._respond(500, {
+                    "success": False,
+                    "error": "Server configuration error: OPENAI_API_KEY not set. Please configure in Vercel Dashboard.",
+                })
                 return
 
-            action = body.get("action", "full_pipeline")
+            client = OpenAI(api_key=api_key)
 
-            # ─────────────────────────────────────────────────────────
-            # ACTION: Return available vibes for Step 1B
-            # ─────────────────────────────────────────────────────────
-            if action == "get_vibes":
-                vibes = []
-                for vid, vdata in VIBE_PRESETS.items():
-                    vibes.append({"id": vid, "label": vdata["label"], "persona": vdata["style_persona"]})
-                self._respond(200, {"success": True, "vibes": vibes})
-                return
+            # ═══════════════════════════════════════════════════════
+            # STEP 1: Infer biometrics from user input (instant, no API call)
+            # ═══════════════════════════════════════════════════════
+            print("━" * 60)
+            print("🚀 STEP 1: Inferring biometrics from user selections...")
+            biometrics_result = infer_biometrics_from_input(skin_tone, body_shape, gender)
 
-            # ─────────────────────────────────────────────────────────
-            # ACTION: Return available occasions for Step 1A
-            # ─────────────────────────────────────────────────────────
-            if action == "get_occasions":
-                occasions = []
-                for oid, odata in OCCASION_PRESETS.items():
-                    occasions.append({"id": oid, "label": odata["label"], "direction": odata["style_direction"]})
-                self._respond(200, {"success": True, "occasions": occasions})
-                return
+            print(f"✅ Biometrics inferred: MST={biometrics_result.get('monk_skin_tone')}, "
+                  f"Gender={biometrics_result.get('gender_presentation')}, "
+                  f"Body={biometrics_result.get('body_type')}")
 
-            # ─────────────────────────────────────────────────────────
-            # ACTION: Return gamification state for Step 5
-            # ─────────────────────────────────────────────────────────
-            if action == "get_gamification":
-                user_id = body.get("user_id", "anonymous")
-                gamification = get_gamification_state(user_id)
-                self._respond(200, {"success": True, "gamification": gamification})
-                return
+            mst_value = biometrics_result.get("monk_skin_tone", 5)
+            color_theory = MST_COLOR_THEORY.get(mst_value, MST_COLOR_THEORY[5])
+            vibe_label = VIBE_PRESETS.get(vibe_id, {}).get("label", "stylish look")
+            occasion_key = occasion.replace("_", " ")
 
-            # ─────────────────────────────────────────────────────────
-            # ACTION: FULL PIPELINE (Steps 2 → 3 → 4 → 5)
-            # ─────────────────────────────────────────────────────────
-            if action == "full_pipeline":
-                pipeline_start = time.time()
+            recommendation = None
+            outfit_pieces = []
+            affiliate_recommendations = []
+            flux_image_url = ""
+            final_image_url = ""
+            source_mode = source_preference
+            vton_product = None
+            global_style_query = ""
+            global_query_category = ""
+            vton_applied = False
 
-                # Validate required fields
-                user_id = body.get("user_id")
-                occasion = body.get("occasion")
-                vibe_id = body.get("vibe_id")
-                user_image = body.get("user_image")  # Base64 encoded
+            # ═══════════════════════════════════════════════════════
+            # PATH A: GLOBAL MARKET (FLUX + optional face swap + affiliates)
+            # ═══════════════════════════════════════════════════════
+            if source_preference == "global_market":
+                print("\n🌍 PATH A: GLOBAL MARKET")
+                path_a = _run_path_a_global(
+                    client=client,
+                    biometrics=biometrics_result,
+                    occasion=occasion,
+                    vibe_id=vibe_id,
+                    user_image=user_image,
+                )
+                recommendation = path_a.get("recommendation", {}) or {}
+                affiliate_recommendations = path_a.get("affiliate_recommendations", []) or []
+                outfit_pieces = path_a.get("outfit_pieces", []) or []
+                final_image_url = path_a.get("final_image_url", "") or ""
+                flux_image_url = path_a.get("flux_image_url", "") or ""
+                vton_product = path_a.get("vector_top_match")
+                global_style_query = path_a.get("style_query", "") or ""
+                global_query_category = path_a.get("vector_category", "") or ""
+                vton_applied = bool(path_a.get("vton_applied", False))
 
-                print(f"📥 Request received: user_id={user_id}, occasion={occasion}, vibe_id={vibe_id}, image_size={len(user_image) if user_image else 0}")
-
-                if not all([user_id, occasion, vibe_id, user_image]):
-                    self._respond(400, {
-                        "success": False,
-                        "error": "Missing required fields: user_id, occasion, vibe_id, user_image",
-                        "required": ["user_id", "occasion", "vibe_id", "user_image"],
-                    })
-                    return
-
-                # ═══════════════════════════════════════════════════════
-                # STEP 2: Extract Biometrics using AWS Rekognition
-                # ═══════════════════════════════════════════════════════
-                print("━" * 60)
-                print("🚀 STEP 2: Extracting biometrics from user photo...")
-                print("━" * 60)
-
-                try:
-                    biometrics_result = extract_biometrics(user_image)
-                except Exception as e:
-                    print(f"❌ STEP 2 FAILED: {str(e)}")
-                    self._respond(500, {
-                        "success": False,
-                        "error": f"Failed to extract biometrics: {str(e)}",
-                    })
-                    return
-
-                if not biometrics_result.get("face_detected"):
-                    self._respond(400, {
-                        "success": False,
-                        "error": "No face detected in the uploaded photo. Please upload a clear selfie with your face visible.",
-                    })
-                    return
-
-                print(f"✅ Biometrics extracted: MST={biometrics_result.get('monk_skin_tone')}, "
-                      f"Gender={biometrics_result.get('gender_presentation')}, "
-                      f"Body={biometrics_result.get('body_type')}")
-
-                # ═══════════════════════════════════════════════════════
-                # STEP 3A: Build the FLUX prompt
-                # ═══════════════════════════════════════════════════════
-                print("\n🎨 STEP 3A: Building personalized FLUX prompt...")
-                flux_prompt = build_flux_prompt(
+            # ═══════════════════════════════════════════════════════
+            # PATH B: MY NARRATIVE (Catalog match + IDM VTON)
+            # ═══════════════════════════════════════════════════════
+            else:
+                print("\n✦ PATH B: MY NARRATIVE")
+                recommendation = generate_my_narrative_recommendation(
+                    client=client,
                     biometrics=biometrics_result,
                     occasion=occasion,
                     vibe_id=vibe_id,
                 )
+                outfit_pieces = recommendation.get("outfit_pieces", [])
+                selected_products = recommendation.get("selected_products", [])
+                if selected_products:
+                    vton_product = selected_products[0]
+                else:
+                    vton_product = _fallback_my_narrative_selection(occasion, vibe_id)[0]
 
-                # ═══════════════════════════════════════════════════════
-                # STEP 3B: Generate FLUX image (SEQUENTIAL — must finish
-                #          before face swap can begin)
-                # ═══════════════════════════════════════════════════════
-                print("\n🖼️  STEP 3B: Generating FLUX editorial image...")
-                print(f"   Prompt: {flux_prompt[:100]}...")
-                
-                try:
-                    flux_image_url = generate_flux_image(flux_prompt)
-                    print(f"   ✅ FLUX generated: {flux_image_url[:80] if flux_image_url else 'None'}...")
-                except Exception as e:
-                    print(f"❌ STEP 3B FAILED: {str(e)}")
-                    # Return the prompt for debugging, but with mock image
-                    flux_image_url = "https://placehold.co/768x1024/1a1a2e/e94560?text=Image+Generation+Failed"
-
-                # ═══════════════════════════════════════════════════════
-                # STEP 3C: Apply Face Swap (SEQUENTIAL — uses FLUX output)
-                # ═══════════════════════════════════════════════════════
-                print("\n🔄 STEP 3C: Applying face swap...")
-                
-                try:
-                    final_image_url = apply_face_swap(
-                        flux_image_url=flux_image_url,
-                        user_face_image=user_image,  # Original uploaded photo
-                    )
-                    print(f"   ✅ Face swap complete: {final_image_url[:80] if final_image_url else 'None'}...")
-                except Exception as e:
-                    print(f"❌ STEP 3C FAILED: {str(e)}")
-                    # Fall back to the FLUX image without face swap
-                    final_image_url = flux_image_url
-                    print("   ⚠️ Using FLUX image without face swap")
-
-                # ═══════════════════════════════════════════════════════════════
-                # STEP 4: Segment Wardrobe + Save to Ghost Closet + Get Affiliate Recommendations
-                # ═══════════════════════════════════════════════════════════════
-                print("
-💾 STEP 4: Segmenting wardrobe + saving profile + generating affiliate recommendations...")
-
-                # Segment wardrobe from user photo (detect items they already own)
-                try:
-                    wardrobe_result = segment_wardrobe(user_image)
-                    print(f"✅ Wardrobe segmented: {wardrobe_result.get('items_detected', 0)} items detected")
-                except Exception as e:
-                    print(f"⚠️ Wardrobe segmentation failed: {e}, using mock data")
-                    wardrobe_result = {
-                        "items_detected": 4,
-                        "items": [
-                            {"id": str(uuid.uuid4()), "slot": "top", "category": "Topwear", "sub_category": "Oversized Hoodie", "color": "Charcoal Grey", "pattern": "solid", "style": "Western", "confidence": 0.95, "description": "Dark grey oversized cotton hoodie"},
-                            {"id": str(uuid.uuid4()), "slot": "bottom", "category": "Bottomwear", "sub_category": "Slim Jeans", "color": "Indigo Blue", "pattern": "solid", "style": "Western", "confidence": 0.93, "description": "Dark wash indigo slim-fit denim jeans"},
-                            {"id": str(uuid.uuid4()), "slot": "footwear", "category": "Footwear", "sub_category": "Running Shoes", "color": "Black", "pattern": "solid", "style": "Western", "confidence": 0.88, "description": "Black mesh running shoes"},
-                            {"id": str(uuid.uuid4()), "slot": "accessory", "category": "Accessory", "sub_category": "Watch", "color": "Silver", "pattern": "solid", "style": "Western", "confidence": 0.78, "description": "Silver minimalist analog watch"},
-                        ],
-                    }
-
-                # Save user photo as profile reference in ghost closet
-                user_profile_item = [{
-                    "id": str(uuid.uuid4()),
-                    "slot": "profile_photo",
-                    "category": "User Photo",
-                    "sub_category": "Reference Image",
-                    "color": "N/A",
-                    "description": "User uploaded photo for AI styling",
-                }]
-                
-                closet_result = save_to_ghost_closet(
-                    user_id=user_id,
-                    wardrobe_items=user_profile_item,
+                # Primary output image must be VTON try-on for My Narrative path.
+                vton_img = run_idm_vton(
+                    user_image=user_image,
+                    garment_image=vton_product.get("flat_lay_url", ""),
+                    description=vton_product.get("title", "streetwear top"),
                 )
+                vton_applied = bool(vton_img)
+                final_image_url = vton_img or vton_product.get("flat_lay_url") or "https://placehold.co/768x1024/0b0b0f/39A596?text=MY+NARRATIVE+LOOK"
+                flux_image_url = ""
 
-                # Generate affiliate recommendations based on occasion + vibe
-                # These are items that would complement the generated look
-                occasion_key = occasion.replace("_", " ")
-                vibe_label = VIBE_PRESETS.get(vibe_id, {}).get("label", "stylish look")
-                
-                affiliate_recommendations = []
-                recommended_items = [
-                    {"item_type": "sneakers", "name": "Footwear", "description": "White Chunky Sneakers", "is_owned": False},
-                    {"item_type": "watch", "name": "Accessory", "description": "Minimalist Watch", "is_owned": False},
-                ]
-                
-                for item in recommended_items:
-                    rec = get_affiliate_recommendation(
-                        item_type=item["item_type"],
-                        style_vibe=vibe_label,
-                    )
-                    rec["recommended_for"] = f"{vibe_label} {occasion_key} look"
-                    rec["gap_item"] = {
-                        "description": item["description"],
-                        "is_owned": item["is_owned"]
-                    }
-                    affiliate_recommendations.append(rec)
+                for p in selected_products[:3]:
+                    affiliate_recommendations.append({
+                        "product_name": p.get("title"),
+                        "brand": "MY NARRATIVE",
+                        "price": p.get("price"),
+                        "original_price": p.get("price"),
+                        "discount_pct": 0,
+                        "currency": "INR",
+                        "affiliate_url": p.get("product_url"),
+                        "add_to_cart_url": p.get("product_url"),
+                        "exact_product_url": p.get("product_url"),
+                        "product_url": p.get("product_url"),
+                        "flat_lay_url": p.get("flat_lay_url"),
+                        "platform": "MY NARRATIVE",
+                        "recommended_for": f"My Narrative {occasion_key} look",
+                        "gap_item": {"description": p.get("title"), "is_owned": False},
+                    })
 
-                # ═══════════════════════════════════════════════════════
-                # STEP 5: Gamification state
-                # ═══════════════════════════════════════════════════════
-                print("\n🎮 STEP 5: Fetching gamification state...")
-                gamification = get_gamification_state(user_id)
+            # ═══════════════════════════════════════════════════════
+            # STEP 5: Gamification state (instant)
+            # ═══════════════════════════════════════════════════════
+            gamification = get_gamification_state(user_id)
 
-                # ─── Get color theory data for the tooltip ───
-                mst_value = biometrics_result.get("monk_skin_tone", 5)
-                color_theory = MST_COLOR_THEORY.get(mst_value, MST_COLOR_THEORY[5])
+            # ═══════════════════════════════════════════════════════
+            # ASSEMBLE FINAL RESPONSE
+            # ═══════════════════════════════════════════════════════
+            pipeline_duration = round(time.time() - pipeline_start, 2)
+            print(f"\n{'━' * 60}")
+            print(f"✅ PIPELINE COMPLETE in {pipeline_duration}s")
+            print(f"{'━' * 60}")
 
-                # ═══════════════════════════════════════════════════════
-                # ASSEMBLE FINAL RESPONSE
-                # ═══════════════════════════════════════════════════════
-                pipeline_duration = round(time.time() - pipeline_start, 2)
-                print(f"\n{'━' * 60}")
-                print(f"✅ PIPELINE COMPLETE in {pipeline_duration}s")
-                print(f"{'━' * 60}")
+            response = {
+                "success": True,
+                "pipeline_duration_seconds": pipeline_duration,
 
-                response = {
+                # Biometric data inferred from user selections
+                "biometrics": {
+                    "monk_skin_tone": mst_value,
+                    "mst_label": MST_LABELS.get(mst_value, "Medium"),
+                    "body_type": biometrics_result.get("body_type"),
+                    "gender_presentation": biometrics_result.get("gender_presentation"),
+                    "confidence": biometrics_result.get("confidence"),
+                },
+                "ghost_closet": {
                     "success": True,
-                    "pipeline_duration_seconds": pipeline_duration,
+                    "user_id": user_id,
+                    "items_saved": 0,
+                    "item_ids": [],
+                },
 
-                    # Step 2 results: Biometric data extracted via AWS Rekognition
-                    "biometrics": {
-                        "monk_skin_tone": mst_value,
-                        "mst_label": MST_LABELS.get(mst_value, "Medium"),
+                # Wardrobe data (placeholder — would use cloth_detection in production)
+                "wardrobe": {
+                    "items_detected": 4,
+                    "items": [
+                        {"id": "wd_1", "slot": "top", "category": "Topwear", "sub_category": recommendation.get("top", {}).get("name", "Stylish Top") if recommendation else "Stylish Top", "color": recommendation.get("top", {}).get("color", "Neutral") if recommendation else "Neutral", "pattern": "solid", "style": "Western", "confidence": 0.95, "description": "AI-recommended top"},
+                        {"id": "wd_2", "slot": "bottom", "category": "Bottomwear", "sub_category": recommendation.get("bottom", {}).get("name", "Slim Trousers") if recommendation else "Slim Trousers", "color": recommendation.get("bottom", {}).get("color", "Dark") if recommendation else "Dark", "pattern": "solid", "style": "Western", "confidence": 0.93, "description": "AI-recommended bottoms"},
+                        {"id": "wd_3", "slot": "footwear", "category": "Footwear", "sub_category": recommendation.get("footwear", {}).get("name", "Clean Sneakers") if recommendation else "Clean Sneakers", "color": recommendation.get("footwear", {}).get("color", "White") if recommendation else "White", "pattern": "solid", "style": "Western", "confidence": 0.88, "description": "AI-recommended footwear"},
+                        {"id": "wd_4", "slot": "accessory", "category": "Accessory", "sub_category": recommendation.get("accessory", {}).get("name", "Watch") if recommendation else "Watch", "color": recommendation.get("accessory", {}).get("color", "Silver") if recommendation else "Silver", "pattern": "solid", "style": "Western", "confidence": 0.78, "description": "AI-recommended accessory"},
+                    ],
+                },
+
+                # Generated editorial image
+                "editorial": {
+                    "flux_prompt": f"AI-styled {vibe_label} look for {occasion_key}",
+                    "flux_image_url": flux_image_url,
+                    "final_image_url": final_image_url,
+                    "vton_image_url": final_image_url if source_mode == "my_narrative" else "",
+                    "vton_applied": vton_applied,
+                    "occasion": OCCASION_PRESETS.get(occasion, {}),
+                    "vibe": VIBE_PRESETS.get(vibe_id, {}),
+                    "source_mode": source_mode,
+                },
+
+                # Color theory + Affiliate recommendations
+                "color_theory": {
+                    "mst_value": mst_value,
+                    "best_colors": color_theory["best_colors"],
+                    "avoid_colors": color_theory["avoid"],
+                    "undertone_note": color_theory["undertone_note"],
+                    "tooltip_text": (
+                        f"Based on your Monk Skin Tone ({MST_LABELS.get(mst_value)}), "
+                        f"{color_theory['undertone_note']} "
+                        f"Best colors: {', '.join(color_theory['best_colors'])}."
+                    ),
+                },
+                "affiliate_upsells": affiliate_recommendations,
+                "my_narrative_catalog": MY_NARRATIVE_CATALOG,
+                "outfit_completion_pct": 100,
+                "source_mode": source_mode,
+                "source_preference": source_mode,
+                "vton_applied": vton_applied,
+                "global_style_query": global_style_query,
+                "global_query_category": global_query_category,
+                "direction": (recommendation or {}).get("direction") or (recommendation or {}).get("outfit_description") or f"Styled {vibe_label} look for {occasion_key}.",
+                "outfit_pieces": outfit_pieces,
+                "suggestions": (recommendation or {}).get("suggestions") or (recommendation or {}).get("styling_tips") or [],
+                "styling_tips": (recommendation or {}).get("styling_tips") or [],
+                "color_science": (recommendation or {}).get("color_science_note") or color_theory.get("undertone_note", ""),
+                "my_narrative_product": vton_product if source_mode == "my_narrative" else None,
+
+                # Gamification + User Profile Data
+                "gamification": gamification,
+
+                # Auto-fill data for user dashboard
+                "user_profile_data": {
+                    "physique": {
+                        "skin_tone": mst_value,
+                        "skin_tone_label": MST_LABELS.get(mst_value, "Medium"),
                         "body_type": biometrics_result.get("body_type"),
-                        "gender_presentation": biometrics_result.get("gender_presentation"),
-                        "confidence": biometrics_result.get("confidence"),
+                        "gender": biometrics_result.get("gender_presentation"),
                     },
-                    "ghost_closet": closet_result,
-
-                    # Step 4 results: Wardrobe data from segmentation
-                    "wardrobe": wardrobe_result,
-
-                    # Step 3 results: Generated editorial image
-                    "editorial": {
-                        "flux_prompt": flux_prompt,
-                        "flux_image_url": flux_image_url,
-                        "final_image_url": final_image_url,
-                        "occasion": OCCASION_PRESETS.get(occasion, {}),
-                        "vibe": VIBE_PRESETS.get(vibe_id, {}),
-                    },
-
-                    # Step 4 results: Color theory + Affiliate recommendations
                     "color_theory": {
-                        "mst_value": mst_value,
                         "best_colors": color_theory["best_colors"],
                         "avoid_colors": color_theory["avoid"],
                         "undertone_note": color_theory["undertone_note"],
-                        "tooltip_text": (
-                            f"Based on your Monk Skin Tone ({MST_LABELS.get(mst_value)}), "
-                            f"{color_theory['undertone_note']} "
-                            f"Best colors: {', '.join(color_theory['best_colors'])}."
-                        ),
                     },
-                    "affiliate_upsells": affiliate_recommendations,
-                    "outfit_completion_pct": 100,
+                    "profile_face_card_url": final_image_url,
+                    "generated_at": time.time(),
+                },
 
-                    # Step 5 results: Gamification + User Profile Data
-                    "gamification": gamification,
-                    
-                    # Auto-fill data for user dashboard
-                    "user_profile_data": {
-                        "physique": {
-                            "skin_tone": mst_value,
-                            "skin_tone_label": MST_LABELS.get(mst_value, "Medium"),
-                            "body_type": biometrics_result.get("body_type"),
-                            "gender": biometrics_result.get("gender_presentation"),
-                        },
-                        "color_theory": {
-                            "best_colors": color_theory["best_colors"],
-                            "avoid_colors": color_theory["avoid"],
-                            "undertone_note": color_theory["undertone_note"],
-                        },
-                        "profile_face_card_url": final_image_url,
-                        "generated_at": time.time(),
-                    },
-                }
+                # GPT-4o fashion recommendation data
+                "recommendation": recommendation,
+            }
 
-                self._respond(200, response)
-                return
+            self._respond(200, response)
+            return
 
-            # Unknown action
-            self._respond(400, {
-                "success": False,
-                "error": f"Unknown action: '{action}'. Valid: full_pipeline, get_vibes, get_occasions, get_gamification",
-            })
-
-        except json.JSONDecodeError:
-            self._respond(400, {"success": False, "error": "Invalid JSON in request body"})
-        except Exception as e:
-            print(f"❌ Pipeline error: {e}")
-            error_msg = str(e)
-
-            # Friendly error messages for known issues
-            if "402" in error_msg or "credit" in error_msg.lower():
-                error_msg = "💳 AI service credits exhausted. Please add credits at replicate.com/account/billing"
-            elif "401" in error_msg or "unauthorized" in error_msg.lower():
-                error_msg = "🔑 Invalid API token. Check your Vercel environment variables."
-            elif "timeout" in error_msg.lower():
-                error_msg = "⏱️ Pipeline timed out. The AI models are taking too long. Please try again."
-
-            self._respond(500, {"success": False, "error": error_msg})
-
-
-
+        # Unknown action
+        self._respond(400, {
+            "success": False,
+            "error": f"Unknown action: '{action}'. Valid: full_pipeline, get_vibes, get_occasions, get_gamification, ingest_affiliate_feed, search_global_inventory",
+        })

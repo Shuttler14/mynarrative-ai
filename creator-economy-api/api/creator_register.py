@@ -119,6 +119,88 @@ class handler(BaseHTTPRequestHandler):
         if 'path' in body:
             path = body['path']
 
+        # vercel.json rewrites /api/creator/register → /api/creator_register, which
+        # lands here. Accept narrative_name / profile_photo_url / bio in addition to
+        # the legacy (user_id, email, username) triple — used by
+        # sections/creator-onboarding-flow.liquid fallback.
+        if path == '/api/creator/register':
+            user_id        = body.get('user_id')
+            email          = body.get('email') or ''
+            username_in    = (body.get('username') or '').strip()
+            narrative_name = (body.get('narrative_name') or '').strip()
+            bio            = (body.get('bio') or body.get('description') or '').strip()
+            avatar_url     = (body.get('avatar_url') or body.get('profile_photo_url') or '').strip()
+
+            if not user_id:
+                self.send_json_response(400, {"success": False, "error": "user_id required"})
+                return
+
+            uname = re.sub(r'[^a-zA-Z0-9_]', '', username_in).lower()
+            if not uname:
+                base = (email.split('@')[0] if email else '') or str(user_id)
+                uname = re.sub(r'[^a-zA-Z0-9_]', '', base).lower() or f"creator{str(user_id)[-6:]}"
+
+            supabase = get_supabase()
+            if not supabase:
+                self.send_json_response(200, {
+                    "success": True, "message": "Registered (demo)",
+                    "data": {"username": uname, "narrative_name": narrative_name}
+                })
+                return
+
+            try:
+                existing = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
+                if existing.data:
+                    upd = {}
+                    if narrative_name: upd["narrative_name"] = narrative_name
+                    if bio:            upd["bio"]            = bio
+                    if avatar_url:     upd["avatar_url"]     = avatar_url
+                    if email:          upd["email"]          = email
+                    if uname:          upd["username"]       = uname
+                    if upd:
+                        upd["updated_at"] = datetime.utcnow().isoformat()
+                        supabase.table("creators").update(upd).eq("shopify_customer_id", user_id).execute()
+                    self.send_json_response(200, {
+                        "success": True, "message": "Updated",
+                        "data": {"username": uname, "is_new": False}
+                    })
+                    return
+
+                data = {
+                    "shopify_customer_id": user_id,
+                    "email": email or f"{uname}@placeholder.local",
+                    "username": uname,
+                    "narrative_name": narrative_name,
+                    "brand_name": "",
+                    "bio": bio,
+                    "avatar_url": avatar_url or f"https://api.dicebear.com/7.x/avataaars/svg?seed={uname}",
+                    "balance": 0,
+                    "lifetime_earnings": 0,
+                    "total_items_sold": 0,
+                    "active_listings": 0,
+                    "commission_tier": "standard",
+                    "commission_rate": config.COMMISSION_STANDARD,
+                    "tier": "basic",
+                    "is_verified": False,
+                    "is_invite_only": False,
+                    "total_followers": 0,
+                    "onboarding_completed": False,
+                    "social_links": {},
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+                result = supabase.table("creators").insert(data).execute()
+                self.send_json_response(200, {
+                    "success": True, "message": "Registered",
+                    "data": {
+                        "username": uname,
+                        "creator_id": result.data[0]["id"] if result.data else None,
+                        "is_new": True
+                    }
+                })
+            except Exception as e:
+                self.send_json_response(200, {"success": True, "message": "Registered (degraded)", "_error": str(e)})
+            return
+
         if path == '/api/creator/auto_register':
             user_id = body.get('user_id')
             email = body.get('email')

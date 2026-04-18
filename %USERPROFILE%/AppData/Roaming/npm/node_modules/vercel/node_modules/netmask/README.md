@@ -80,6 +80,8 @@ API
 - `.hostmask`: The host mask which is the opposite of the netmask (eg: 0.0.0.255).
 - `.bitmask`: The netmask as a number of bits in the network portion of the address for this block (eg: 24).
 - `.size`: The number of IP addresses in a block (eg: 256).
+- `.maskLong`: **Deprecated.** The netmask as an unsigned 32-bit integer. Only meaningful for IPv4; returns `0` for IPv6.
+- `.netLong`: **Deprecated.** The base address as an unsigned 32-bit integer. Only meaningful for IPv4; returns `0` for IPv6.
 - `.broadcast`: The blocks broadcast address (eg: 192.168.1.0/24 => 192.168.1.255). Always `undefined` for IPv6.
 - `.first`, `.last`: First and last useable address.
 - `.contains(ip or block)`: Returns a true if the IP number `ip` is part of the network. That is, a true value is returned if `ip` is between `base` and `broadcast`. If a Netmask object or a block is given, it returns true only of the given block fits inside the network.

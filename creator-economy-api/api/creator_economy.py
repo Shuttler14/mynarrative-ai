@@ -420,20 +420,76 @@ class handler(BaseHTTPRequestHandler):
                 self.send_json_response(200, {"success": True, "data": demo_orders[:limit]})
                 return
 
+            # Orders live in `design_orders` (keyed by shopify_customer_id on `creator_id` TEXT field).
+            # Legacy code referenced a non-existent `creator_orders` table — fixed here.
             try:
-                result = supabase.table("creator_orders").select("*").eq("creator_id", user_id).order("created_at", desc=True).limit(limit).execute()
+                result = (
+                    supabase.table("design_orders")
+                    .select("id, shopify_order_id, design_title, product_type, color, quantity, price_paise, creator_cut_paise, status, created_at")
+                    .eq("creator_id", user_id)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
                 orders = []
                 for order in (result.data or []):
+                    product_name_parts = [order.get("design_title") or "Design Sale"]
+                    if order.get("product_type"):
+                        product_name_parts.append(order["product_type"].title())
+                    if order.get("color"):
+                        product_name_parts.append(order["color"].title())
                     orders.append({
-                        "id": order.get("order_id"),
-                        "product_name": order.get("product_name", "Design Sale"),
-                        "amount": order.get("amount", 0),
-                        "status": order.get("status", "completed"),
+                        "id": order.get("shopify_order_id") or order.get("id"),
+                        "product_name": " — ".join(product_name_parts),
+                        "amount": (order.get("price_paise") or 0) // 100,
+                        "amount_paise": order.get("price_paise") or 0,
+                        "creator_cut_paise": order.get("creator_cut_paise") or 0,
+                        "quantity": order.get("quantity") or 1,
+                        "status": order.get("status") or "completed",
                         "created_at": order.get("created_at"),
                     })
                 self.send_json_response(200, {"success": True, "data": orders})
             except Exception as e:
-                self.send_json_response(200, {"success": True, "data": []})
+                self.send_json_response(200, {"success": True, "data": [], "_error": str(e)})
+            return
+
+        # Alias: /api/creator/designs → /api/designs/creator (so dashboards have a consistent path)
+        if path == '/api/creator/designs':
+            user_id = params.get('user_id', [None])[0]
+            if not user_id:
+                self.send_json_response(400, {"success": False, "error": "user_id required"})
+                return
+            supabase = get_supabase()
+            if not supabase:
+                self.send_json_response(200, {"success": True, "data": [], "designs": []})
+                return
+            try:
+                cr = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
+                if not cr.data:
+                    self.send_json_response(200, {"success": True, "data": [], "designs": []})
+                    return
+                creator_db_id = cr.data[0]["id"]
+                result = (
+                    supabase.table("creator_designs")
+                    .select("*")
+                    .eq("creator_id", creator_db_id)
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                designs = []
+                for d in (result.data or []):
+                    designs.append({
+                        **d,
+                        "image_url": d.get("flux_editorial_image_url") or d.get("flat_image_url", ""),
+                        "shopify_product_url": (
+                            d.get("shopify_product_url")
+                            or (f"/products/{d.get('shopify_product_id', '')}"
+                                if d.get("shopify_product_id") else "")
+                        ),
+                    })
+                self.send_json_response(200, {"success": True, "data": designs, "designs": designs})
+            except Exception as e:
+                self.send_json_response(200, {"success": True, "data": [], "designs": [], "_error": str(e)})
             return
 
         if path == '/api/creator/analytics':
@@ -499,45 +555,272 @@ class handler(BaseHTTPRequestHandler):
         if 'path' in body:
             path = body['path']
 
-        if path == '/api/creator/register':
-            user_id = body.get('user_id')
-            email = body.get('email')
-            username = body.get('username')
-            
-            if not user_id or not email or not username:
-                self.send_json_response(400, {"success": False, "error": "user_id, email, username required"})
+        # Back-compat alias: used to POST /api/creator_economy?path=/api/creator/register
+        # from the onboarding flow. We now ALSO handle /api/creator/onboarding/complete
+        # below, but we keep this route working to avoid breaking older theme versions.
+        if path in ('/api/creator/register', '/api/creator_economy'):
+            # `/api/creator_economy` fall-through used by the legacy `?path=` query pattern
+            if path == '/api/creator_economy' and body.get('path') not in ('/api/creator/register',
+                                                                           '/api/creator/onboarding/complete',
+                                                                           '/api/creator/photo/upload'):
+                self.send_json_response(404, {"error": "Not found"})
                 return
-            
-            username = re.sub(r'[^a-zA-Z0-9_]', '', username).lower()
-            
+
+            user_id        = body.get('user_id')
+            email          = body.get('email') or ''
+            username       = body.get('username') or ''
+            narrative_name = (body.get('narrative_name') or '').strip()
+            brand_name     = (body.get('brand_name') or '').strip()
+            bio            = (body.get('bio') or body.get('description') or '').strip()
+            avatar_url     = (body.get('avatar_url') or body.get('profile_photo_url') or '').strip()
+
+            if not user_id:
+                self.send_json_response(400, {"success": False, "error": "user_id required"})
+                return
+
+            # `username` must be URL-safe and non-empty; derive a fallback from email/user_id.
+            uname = re.sub(r'[^a-zA-Z0-9_]', '', username).lower()
+            if not uname:
+                src = (email.split('@')[0] if email else '') or str(user_id)
+                uname = re.sub(r'[^a-zA-Z0-9_]', '', src).lower() or f"creator{str(user_id)[-6:]}"
+
             supabase = get_supabase()
             if not supabase:
-                self.send_json_response(200, {"success": True, "message": "Registered (demo mode)"})
+                self.send_json_response(200, {
+                    "success": True,
+                    "message": "Registered (demo mode)",
+                    "data": {"username": uname, "narrative_name": narrative_name}
+                })
                 return
-            
+
             try:
                 existing = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
                 if existing.data:
-                    self.send_json_response(200, {"success": True, "message": "Already registered"})
+                    update_data = {}
+                    if email:          update_data["email"]          = email
+                    if uname:          update_data["username"]       = uname
+                    if narrative_name: update_data["narrative_name"] = narrative_name
+                    if brand_name:     update_data["brand_name"]     = brand_name
+                    if bio:            update_data["bio"]            = bio
+                    if avatar_url:     update_data["avatar_url"]     = avatar_url
+                    if update_data:
+                        update_data["updated_at"] = datetime.utcnow().isoformat()
+                        supabase.table("creators").update(update_data).eq("shopify_customer_id", user_id).execute()
+                    self.send_json_response(200, {
+                        "success": True, "message": "Profile updated",
+                        "data": {"username": uname, "narrative_name": narrative_name, "avatar_url": avatar_url}
+                    })
                     return
-                
+
                 data = {
                     "shopify_customer_id": user_id,
-                    "email": email,
-                    "username": username,
+                    "email": email or f"{uname}@placeholder.local",
+                    "username": uname,
+                    "narrative_name": narrative_name or (brand_name + "'s Designs" if brand_name else ""),
+                    "brand_name": brand_name,
+                    "bio": bio,
+                    "avatar_url": avatar_url or f"https://api.dicebear.com/7.x/avataaars/svg?seed={uname}",
                     "balance": 0,
                     "lifetime_earnings": 0,
                     "total_items_sold": 0,
+                    "active_listings": 0,
                     "commission_tier": "standard",
                     "commission_rate": config.COMMISSION_STANDARD,
                     "style_influence_rank": "rookie_designer",
                     "is_mega_influencer": False,
+                    "onboarding_completed": False,
                     "created_at": datetime.utcnow().isoformat(),
                 }
                 supabase.table("creators").insert(data).execute()
-                self.send_json_response(200, {"success": True, "message": "Registered successfully"})
+                self.send_json_response(200, {
+                    "success": True, "message": "Registered successfully",
+                    "data": {"username": uname, "narrative_name": data["narrative_name"], "avatar_url": data["avatar_url"]}
+                })
             except Exception as e:
-                self.send_json_response(200, {"success": True, "message": "Registered (error handling)"})
+                self.send_json_response(200, {"success": True, "message": "Registered (error handling)", "_error": str(e)})
+            return
+
+        # Full profile-setup payload from sections/creator-onboarding-flow.liquid
+        if path == '/api/creator/onboarding/complete':
+            user_id           = body.get('user_id')
+            brand_name        = (body.get('brand_name') or '').strip()
+            narrative_name    = (body.get('narrative_name') or '').strip()
+            username          = (body.get('username') or '').strip()
+            description       = (body.get('description') or body.get('bio') or '').strip()
+            profile_photo_url = (body.get('profile_photo_url') or body.get('avatar_url') or '').strip()
+            onboarding_type   = (body.get('type') or 'standard').lower()  # 'standard' | 'elite'
+            social_links      = body.get('social_links') or {}
+            primary_platform  = body.get('primary_platform') or None
+
+            if not user_id:
+                self.send_json_response(400, {"success": False, "error": "user_id required"})
+                return
+
+            uname = re.sub(r'[^a-zA-Z0-9_]', '', username).lower()
+            if not uname:
+                uname = re.sub(r'[^a-zA-Z0-9_]', '', brand_name).lower() or f"creator{str(user_id)[-6:]}"
+            if not narrative_name:
+                narrative_name = (brand_name + "'s Designs") if brand_name else (uname + "'s Designs")
+
+            is_elite = (onboarding_type == 'elite')
+            commission_rate = 35 if is_elite else 15
+            commission_tier = 'elite' if is_elite else 'standard'
+
+            supabase = get_supabase()
+            if not supabase:
+                self.send_json_response(200, {
+                    "success": True,
+                    "message": "Onboarding complete (demo)",
+                    "data": {
+                        "username": uname,
+                        "narrative_name": narrative_name,
+                        "avatar_url": profile_photo_url,
+                        "tier": ("Elite Creator" if is_elite else "Creator"),
+                        "commission_rate": commission_rate,
+                    }
+                })
+                return
+
+            try:
+                common = {
+                    "username": uname,
+                    "narrative_name": narrative_name,
+                    "brand_name": brand_name,
+                    "bio": description,
+                    "description": description,
+                    "commission_tier": commission_tier,
+                    "commission_rate": commission_rate,
+                    "social_links": social_links,
+                    "onboarding_completed": True,
+                    "onboarding_completed_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+                if profile_photo_url:
+                    common["avatar_url"] = profile_photo_url
+                    common["profile_photo_url"] = profile_photo_url
+                if primary_platform:
+                    common["primary_platform"] = primary_platform
+                if is_elite:
+                    common["tier"] = "elite"
+
+                existing = supabase.table("creators").select("id").eq("shopify_customer_id", user_id).execute()
+                if existing.data:
+                    # Never overwrite required fields on UPDATE; Supabase PATCH tolerates
+                    # missing unknown columns but will reject unknown ones — so we strip
+                    # fields that may not exist in older schemas.
+                    safe = {k: v for k, v in common.items() if k not in ("description", "profile_photo_url", "tier")}
+                    supabase.table("creators").update(safe).eq("shopify_customer_id", user_id).execute()
+                else:
+                    ins = {
+                        **common,
+                        "shopify_customer_id": user_id,
+                        "email": body.get('email') or f"{uname}@placeholder.local",
+                        "avatar_url": profile_photo_url or f"https://api.dicebear.com/7.x/avataaars/svg?seed={uname}",
+                        "balance": 0,
+                        "lifetime_earnings": 0,
+                        "total_items_sold": 0,
+                        "active_listings": 0,
+                        "style_influence_rank": "rookie_designer",
+                        "is_mega_influencer": is_elite,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                    safe = {k: v for k, v in ins.items() if k not in ("description", "profile_photo_url", "tier")}
+                    supabase.table("creators").insert(safe).execute()
+
+                self.send_json_response(200, {
+                    "success": True,
+                    "message": "Onboarding complete",
+                    "data": {
+                        "username": uname,
+                        "narrative_name": narrative_name,
+                        "avatar_url": profile_photo_url,
+                        "tier": ("Elite Creator" if is_elite else "Creator"),
+                        "commission_rate": commission_rate,
+                    }
+                })
+            except Exception as e:
+                # Non-fatal — frontend stores locally and continues
+                self.send_json_response(200, {
+                    "success": True,
+                    "message": "Onboarding saved (degraded)",
+                    "data": {
+                        "username": uname,
+                        "narrative_name": narrative_name,
+                        "avatar_url": profile_photo_url,
+                        "tier": ("Elite Creator" if is_elite else "Creator"),
+                        "commission_rate": commission_rate,
+                    },
+                    "_error": str(e)
+                })
+            return
+
+        # Profile photo upload. The theme posts a data-URL; we simply forward it
+        # into Supabase Storage `creator-avatars/` and return the public URL.
+        # Theme has a graceful fallback if this endpoint is offline (keeps data-URL).
+        if path == '/api/creator/photo/upload':
+            user_id   = body.get('user_id')
+            data_url  = body.get('photo') or body.get('data_url') or ''
+            if not user_id or not data_url.startswith('data:'):
+                self.send_json_response(400, {"success": False, "error": "user_id and photo data-url required"})
+                return
+            try:
+                header, b64 = data_url.split(',', 1)
+                mime = 'image/png'
+                if header.startswith('data:') and ';' in header:
+                    mime = header[5:].split(';', 1)[0] or 'image/png'
+                import base64 as _b64
+                raw = _b64.b64decode(b64)
+            except Exception as e:
+                self.send_json_response(400, {"success": False, "error": f"Could not decode data URL: {e}"})
+                return
+
+            supa_url = os.environ.get("SUPABASE_URL", "").rstrip('/')
+            supa_key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY", "")
+            if not supa_url or not supa_key:
+                self.send_json_response(200, {
+                    "success": True, "photo_url": data_url, "message": "Stored inline (no Supabase)"
+                })
+                return
+
+            ext = (mime.split('/')[-1] or 'png').lower().replace('jpeg', 'jpg')
+            fname = f"creator-avatars/{user_id}-{int(datetime.utcnow().timestamp())}.{ext}"
+            upload_url = f"{supa_url}/storage/v1/object/creator_assets/{fname}"
+            try:
+                import urllib.request, urllib.error
+                req = urllib.request.Request(
+                    upload_url,
+                    data=raw,
+                    method='POST',
+                    headers={
+                        'Authorization': f'Bearer {supa_key}',
+                        'apikey': supa_key,
+                        'Content-Type': mime,
+                        'x-upsert': 'true',
+                    }
+                )
+                urllib.request.urlopen(req, timeout=10).read()
+                public_url = f"{supa_url}/storage/v1/object/public/creator_assets/{fname}"
+
+                # Also persist on creators row
+                try:
+                    supabase = get_supabase()
+                    if supabase:
+                        supabase.table("creators").update({
+                            "avatar_url": public_url,
+                            "updated_at": datetime.utcnow().isoformat(),
+                        }).eq("shopify_customer_id", user_id).execute()
+                except Exception:
+                    pass
+
+                self.send_json_response(200, {"success": True, "photo_url": public_url, "url": public_url})
+            except Exception as e:
+                # Graceful fallback — theme can keep using the data URL.
+                self.send_json_response(200, {
+                    "success": True,
+                    "photo_url": data_url,
+                    "message": "Stored inline (upload failed)",
+                    "_error": str(e)
+                })
             return
 
         if path == '/api/creator/social/link':
