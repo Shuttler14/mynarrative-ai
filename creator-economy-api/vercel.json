@@ -38,6 +38,8 @@
     { "source": "/api/creator/tokens/health",     "destination": "/api/creator_tokens" },
     { "source": "/api/creator/register",          "destination": "/api/creator_register" },
     { "source": "/api/creator/verify",            "destination": "/api/creator_verification" },
+    { "source": "/api/verify_social",             "destination": "/api/verify_social" },
+    { "source": "/api/verify_social/health",      "destination": "/api/verify_social" },
     { "source": "/api/creator/(.*)",              "destination": "/api/creator_economy" }
   ],
   "headers": [

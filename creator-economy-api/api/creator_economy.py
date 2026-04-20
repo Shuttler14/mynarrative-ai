@@ -682,6 +682,60 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             try:
+                # ─────────────────────────────────────────────────────────────
+                # UNIQUENESS GUARD — Username & Narrative Name
+                # Before any upsert we verify neither identifier is already
+                # claimed by a *different* creator. Returns HTTP 409 with
+                # error:"username_taken" so the frontend can surface an
+                # inline red error under the offending field.
+                # ─────────────────────────────────────────────────────────────
+                try:
+                    user_id_str = str(user_id)
+                    taken_fields = []
+
+                    # 1) Username collision check
+                    if uname:
+                        uname_hits = (
+                            supabase.table("creators")
+                            .select("shopify_customer_id,username,narrative_name")
+                            .eq("username", uname)
+                            .limit(5)
+                            .execute()
+                        )
+                        for row in (uname_hits.data or []):
+                            other = str(row.get("shopify_customer_id") or '')
+                            if other and other != user_id_str:
+                                taken_fields.append("username")
+                                break
+
+                    # 2) Narrative-name collision check (case-insensitive)
+                    if narrative_name:
+                        nn_hits = (
+                            supabase.table("creators")
+                            .select("shopify_customer_id,narrative_name")
+                            .ilike("narrative_name", narrative_name)
+                            .limit(5)
+                            .execute()
+                        )
+                        for row in (nn_hits.data or []):
+                            other = str(row.get("shopify_customer_id") or '')
+                            if other and other != user_id_str:
+                                taken_fields.append("narrative_name")
+                                break
+
+                    if taken_fields:
+                        self.send_json_response(409, {
+                            "success": False,
+                            "error": "username_taken",
+                            "message": "This Username or Narrative Name is already claimed.",
+                            "fields": list(set(taken_fields))
+                        })
+                        return
+                except Exception as _uniq_err:
+                    # Never block onboarding on a transient lookup failure —
+                    # but log it so Vercel surfaces the cause.
+                    print(f"[onboarding.complete] uniqueness check failed: {_uniq_err}")
+
                 common = {
                     "username": uname,
                     "narrative_name": narrative_name,
