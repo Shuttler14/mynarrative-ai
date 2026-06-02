@@ -3,22 +3,24 @@
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
-        { "key": "Access-Control-Max-Age", "value": "86400" }
+        { "key": "Access-Control-Max-Age",       "value": "86400" }
       ]
     }
   ],
   "functions": {
-    "api/stylist_pipeline.py": {
-      "maxDuration": 120
-    }
+    "api/**/*.py": { "maxDuration": 120 }
   },
   "rewrites": [
+    { "source": "/api/webhook/shopify",                "destination": "/api/dtf_pipeline" },
+    { "source": "/api/webhook/shopify/health",         "destination": "/api/dtf_pipeline" },
+    { "source": "/api/dtf/health",                     "destination": "/api/dtf_pipeline" },
+    { "source": "/api/dtf/process",                    "destination": "/api/dtf_pipeline" },
     { "source": "/api/webhook/order_paid",             "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/order_fulfilled",        "destination": "/api/shopify_webhook" },
-    { "source": "/api/webhook/order_refunded",          "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/order_refunded",         "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/health",                 "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/design-order",           "destination": "/api/design_order_webhook" },
     { "source": "/api/webhook/design-order/health",    "destination": "/api/design_order_webhook" },
@@ -34,7 +36,18 @@
     { "source": "/api/fulfillment/generate_gang_sheet","destination": "/api/fulfillment_generate_gang_sheet" },
     { "source": "/api/creator/earnings",               "destination": "/api/creator_earnings" },
     { "source": "/api/creator/earnings/summary",       "destination": "/api/creator_earnings" },
-    { "source": "/api/creator/earnings/health",         "destination": "/api/creator_earnings" },
-    { "source": "/api/creator/(.*)",                   "destination": "/api/creator_economy" }
+    { "source": "/api/creator/earnings/health",        "destination": "/api/creator_earnings" },
+    { "source": "/api/creator/(.*)",                   "destination": "/api/creator_economy" },
+    { "source": "/api/tryon/compose",                  "destination": "/api/vton_compositor" },
+    { "source": "/api/tryon/single",                   "destination": "/api/virtual_try_on" },
+    { "source": "/api/tryon/full",                     "destination": "/api/virtual_try_on" },
+    { "source": "/api/flatlay/extract",                "destination": "/api/flatlay_extractor" },
+    { "source": "/api/flatlay/classify",               "destination": "/api/flatlay_extractor" },
+    { "source": "/api/marketplace/search",             "destination": "/api/marketplace_scraper" },
+    { "source": "/api/marketplace/ingest",             "destination": "/api/marketplace_scraper" },
+    { "source": "/api/recommend",                      "destination": "/api/recommendation_engine" },
+    { "source": "/api/recommend/:action",              "destination": "/api/recommendation_engine" },
+    { "source": "/api/looks",                          "destination": "/api/user_looks" },
+    { "source": "/api/looks/:action",                  "destination": "/api/user_looks" }
   ]
 }
