@@ -11,7 +11,7 @@ Required env vars (set in .env or system env):
     SHOPIFY_STORE_URL           e.g. mynarrative.myshopify.com
     SHOPIFY_ADMIN_ACCESS_TOKEN  Admin API token (starts with shpat_)
     VERCEL_DEPLOYMENT_URL       e.g. https://api.mynarrative.store
-                                (fallback: https://creator-economy-1ucdnedyn-aryans-projects-af8c9a95.vercel.app)
+                                (fallback: https://mynarrative-ai.vercel.app)
 
 Optional:
     SHOPIFY_API_VERSION         default: 2024-01
