@@ -31,14 +31,14 @@ class handler(BaseHTTPRequestHandler):
             color = data.get('color', 'black')
             source_input = data.get('source_input', '')
 
-            # 4. GENERATE IMAGE (DALL-E 2 for Speed)
-            # This generates in ~3-4 seconds, preventing timeouts.
+            # 4. GENERATE IMAGE (DALL-E 3 — DALL-E 2 was deprecated by OpenAI)
             color_clause = f", {color} ink on contrasting background" if color else ""
             source_clause = f", inspired by: {source_input}" if source_input else ""
             response = client.images.generate(
-                model="dall-e-2",
-                prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}",
-                size="512x512",
+                model="dall-e-3",
+                prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
+                size="1024x1024",
+                quality="standard",
                 n=1,
             )
 
