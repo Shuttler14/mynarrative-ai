@@ -26,25 +26,29 @@ class handler(BaseHTTPRequestHandler):
         try:
             # 3. PARSE THE SIMPLE INPUTS
             data = json.loads(post_data)
-            quote = data.get('quote', 'No Slogan')
-            style = data.get('style', 'Streetwear') 
+            quote = data.get('quote') or data.get('slogan') or 'No Slogan'
+            style = data.get('style', 'Streetwear')
+            color = data.get('color', 'black')
+            source_input = data.get('source_input', '')
 
             # 4. GENERATE IMAGE (DALL-E 2 for Speed)
             # This generates in ~3-4 seconds, preventing timeouts.
+            color_clause = f", {color} ink on contrasting background" if color else ""
+            source_clause = f", inspired by: {source_input}" if source_input else ""
             response = client.images.generate(
-                model="dall-e-2", 
-                prompt=f"Vector graphic logo design. High contrast, minimalist. Theme: {style}. Text: '{quote}'",
+                model="dall-e-2",
+                prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}",
                 size="512x512",
                 n=1,
             )
 
             image_url = response.data[0].url
-            
+
             # 5. WATERMARK & PROCESS
             img_response = requests.get(image_url)
             img = Image.open(BytesIO(img_response.content))
             draw = ImageDraw.Draw(img)
-            
+
             # Add simple watermark
             width, height = img.size
             for x in range(0, width, 400):
@@ -55,12 +59,15 @@ class handler(BaseHTTPRequestHandler):
             buffered = BytesIO()
             img.convert("RGB").save(buffered, format="JPEG", quality=50)
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            image_data_uri = f"data:image/jpeg;base64,{img_str}"
 
             # 6. SEND BACK TO WEBSITE
+            # Theme expects image_url (the data URI). Also return image_preview/temp_url for legacy callers.
             response_data = {
-                "success": True, 
-                "image_preview": f"data:image/jpeg;base64,{img_str}",
-                "temp_url": image_url 
+                "success": True,
+                "image_url": image_data_uri,
+                "image_preview": image_data_uri,
+                "temp_url": image_url
             }
             self.wfile.write(json.dumps(response_data).encode('utf-8'))
 

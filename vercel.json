@@ -66,6 +66,8 @@
     { "source": "/api/recommend",                      "destination": "/api/recommendation_engine" },
     { "source": "/api/recommend/:action",              "destination": "/api/recommendation_engine" },
     { "source": "/api/looks",                          "destination": "/api/user_looks" },
-    { "source": "/api/looks/:action",                  "destination": "/api/user_looks" }
+    { "source": "/api/looks/:action",                  "destination": "/api/user_looks" },
+    { "source": "/api/ai/slogans",                     "destination": "/api/generate_slogans" },
+    { "source": "/api/ai/design-image",                "destination": "/api/generate_design" }
   ]
 }
