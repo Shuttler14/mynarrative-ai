@@ -1,2 +1,26 @@
 .vercel
 .env*.local
+.env
+.env.production
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local-only Windows-style stray dirs that snuck into the working tree
+%USERPROFILE%/
+
+# Test artifacts
+flatlay_result.webp
+vton_result.jpg

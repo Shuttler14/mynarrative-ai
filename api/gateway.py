@@ -33,8 +33,6 @@ ROUTES = [
     ('/api/classify_item', 'classify_item'),
     ('/api/cloth_detection', 'cloth_detection'),
     ('/api/fashion_consultant', 'fashion_consultant'),
-    ('/api/generate_design', 'generate_design'),
-    ('/api/generate_slogans', 'generate_slogans'),
     ('/api/physique_analyze', 'physique_analyze'),
     ('/api/profile_manager', 'profile_manager'),
     ('/api/secure_image', 'secure_image'),

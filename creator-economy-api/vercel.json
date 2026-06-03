@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/generate_design.py":  { "maxDuration": 60 },
-    "api/generate_slogans.py": { "maxDuration": 30 }
+    "api/generate_slogans.py": { "maxDuration": 30 },
+    "api/dtf_pipeline.py":     { "maxDuration": 120 }
   },
   "rewrites": [
     { "source": "/api/ai/slogans",                "destination": "/api/generate_slogans" },
@@ -19,6 +20,10 @@
     { "source": "/api/webhook/order_paid",        "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/order_fulfilled",   "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/order_refunded",    "destination": "/api/shopify_webhook" },
+    { "source": "/api/webhook/shopify",           "destination": "/api/dtf_pipeline" },
+    { "source": "/api/webhook/shopify/health",    "destination": "/api/dtf_pipeline" },
+    { "source": "/api/dtf/health",                "destination": "/api/dtf_pipeline" },
+    { "source": "/api/dtf/process",               "destination": "/api/dtf_pipeline" },
     { "source": "/api/webhook/design-order",      "destination": "/api/design_order_webhook" },
     { "source": "/api/webhook/design-order/health","destination": "/api/design_order_webhook" },
     { "source": "/api/webhook/design-refund",     "destination": "/api/design_refund_webhook" },

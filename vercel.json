@@ -18,7 +18,9 @@
     "api/marketplace_scraper.py":  { "maxDuration": 120 },
     "api/recommendation_engine.py":{ "maxDuration": 120 },
     "api/user_looks.py":           { "maxDuration": 120 },
-    "api/vton_compositor.py":      { "maxDuration": 120 }
+    "api/vton_compositor.py":      { "maxDuration": 120 },
+    "api/generate_design.py":      { "maxDuration": 120 },
+    "api/generate_slogans.py":     { "maxDuration": 120 }
   },
   "rewrites": [
     { "source": "/api/webhook/shopify",                "destination": "/api/gateway" },
@@ -48,8 +50,6 @@
     { "source": "/api/classify_item",                  "destination": "/api/gateway" },
     { "source": "/api/cloth_detection",                "destination": "/api/gateway" },
     { "source": "/api/fashion_consultant",             "destination": "/api/gateway" },
-    { "source": "/api/generate_design",                "destination": "/api/gateway" },
-    { "source": "/api/generate_slogans",               "destination": "/api/gateway" },
     { "source": "/api/physique_analyze",               "destination": "/api/gateway" },
     { "source": "/api/profile_manager",                "destination": "/api/gateway" },
     { "source": "/api/secure_image",                   "destination": "/api/gateway" },
