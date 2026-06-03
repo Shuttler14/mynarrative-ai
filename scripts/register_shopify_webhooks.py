@@ -11,7 +11,7 @@ Required env vars (set in .env or system env):
     SHOPIFY_STORE_URL           e.g. mynarrative.myshopify.com
     SHOPIFY_ADMIN_ACCESS_TOKEN  Admin API token (starts with shpat_)
     VERCEL_DEPLOYMENT_URL       e.g. https://api.mynarrative.store
-                                (fallback: https://mynarrative-ai.vercel.app)
+                                (fallback: https://mynarrative-ai-peach.vercel.app)
 
 Optional:
     SHOPIFY_API_VERSION         default: 2024-01
@@ -152,7 +152,7 @@ def run():
         print("\nSet these in mynarrative-ai/.env or as system env vars:")
         print("   SHOPIFY_STORE_URL=mynarrative.myshopify.com")
         print("   SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxx")
-        print("   VERCEL_DEPLOYMENT_URL=https://mynarrative-ai.vercel.app")
+        print("   VERCEL_DEPLOYMENT_URL=https://mynarrative-ai-peach.vercel.app")
         sys.exit(1)
 
     print(f"\n  Store:      {SHOPIFY_STORE_URL}")

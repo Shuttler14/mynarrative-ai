@@ -1,6 +1,6 @@
 import requests
 
-url = "https://mynarrative-ai.vercel.app/api/stylist_pipeline"
+url = "https://mynarrative-ai-peach.vercel.app/api/stylist_pipeline"
 
 # Test OPTIONS (CORS preflight)
 print("Testing OPTIONS request...")

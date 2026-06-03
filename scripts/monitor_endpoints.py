@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 # ─────────────────────────────────────────────────────────────
 PROD_URL = os.environ.get(
     "VERCEL_DEPLOYMENT_URL",
-    "https://mynarrative-ai.vercel.app"
+    "https://mynarrative-ai-peach.vercel.app"
 )
 
 ENDPOINTS = [

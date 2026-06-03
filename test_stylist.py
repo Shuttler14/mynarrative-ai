@@ -1,7 +1,7 @@
 import requests
 import json
 
-url = "https://mynarrative-ai.vercel.app/api/stylist_pipeline"
+url = "https://mynarrative-ai-peach.vercel.app/api/stylist_pipeline"
 # url = "http://localhost:8000/api/stylist_pipeline"
 
 payload = {
