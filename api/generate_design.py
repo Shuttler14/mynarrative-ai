@@ -31,22 +31,42 @@ class handler(BaseHTTPRequestHandler):
             color = data.get('color', 'black')
             source_input = data.get('source_input', '')
 
-            # 4. GENERATE IMAGE (DALL-E 3 — DALL-E 2 was deprecated by OpenAI)
+            # 4. GENERATE IMAGE (gpt-image-1 — DALL-E 2/3 unavailable on this OpenAI account)
             color_clause = f", {color} ink on contrasting background" if color else ""
             source_clause = f", inspired by: {source_input}" if source_input else ""
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-
-            image_url = response.data[0].url
+            try:
+                response = client.images.generate(
+                    model="gpt-image-1",
+                    prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
+                    size="1024x1024",
+                    n=1,
+                )
+                # gpt-image-1 returns base64 directly (no URL)
+                image_b64 = response.data[0].b64_json
+                img = Image.open(BytesIO(base64.b64decode(image_b64)))
+            except Exception as openai_err:
+                # Fallback: if gpt-image-1 also fails, try Replicate (FLUX) since the
+                # user has REPLICATE_API_TOKEN configured and the stylist pipeline
+                # already uses it.
+                replicate_token = os.environ.get("REPLICATE_API_TOKEN")
+                if not replicate_token:
+                    raise openai_err
+                import replicate
+                output = replicate.run(
+                    "black-forest-labs/flux-schnell",
+                    input={
+                        "prompt": f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
+                        "aspect_ratio": "1:1",
+                        "output_format": "jpg",
+                        "output_quality": 80
+                    }
+                )
+                # FLUX returns a URL (or list of URLs)
+                image_url = output[0] if isinstance(output, list) else output
+                img_response = requests.get(image_url)
+                img = Image.open(BytesIO(img_response.content))
 
             # 5. WATERMARK & PROCESS
-            img_response = requests.get(image_url)
-            img = Image.open(BytesIO(img_response.content))
             draw = ImageDraw.Draw(img)
 
             # Add simple watermark
