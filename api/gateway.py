@@ -1,4 +1,5 @@
 import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '_lib'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'creator-economy-api', 'api'))
 
 from http.server import BaseHTTPRequestHandler
@@ -29,6 +30,17 @@ ROUTES = [
     ('/api/creator/earnings', 'creator_earnings'),
     ('/api/creator/earnings/summary', 'creator_earnings'),
     ('/api/creator/earnings/health', 'creator_earnings'),
+    ('/api/classify_item', 'classify_item'),
+    ('/api/cloth_detection', 'cloth_detection'),
+    ('/api/fashion_consultant', 'fashion_consultant'),
+    ('/api/generate_design', 'generate_design'),
+    ('/api/generate_slogans', 'generate_slogans'),
+    ('/api/physique_analyze', 'physique_analyze'),
+    ('/api/profile_manager', 'profile_manager'),
+    ('/api/secure_image', 'secure_image'),
+    ('/api/shopify_product', 'shopify_product'),
+    ('/api/user_profile', 'user_profile'),
+    ('/api/verify_social', 'verify_social'),
 ]
 
 class handler(BaseHTTPRequestHandler):
