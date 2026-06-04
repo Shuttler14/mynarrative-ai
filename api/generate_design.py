@@ -31,9 +31,10 @@ class handler(BaseHTTPRequestHandler):
             color = data.get('color', 'black')
             source_input = data.get('source_input', '')
 
-            # 4. GENERATE IMAGE (gpt-image-1 — DALL-E 2/3 unavailable on this OpenAI account)
+            # 4. GENERATE IMAGE (gpt-image-1 first, Replicate FLUX as fallback)
             color_clause = f", {color} ink on contrasting background" if color else ""
             source_clause = f", inspired by: {source_input}" if source_input else ""
+            image_url = None  # set in one of the two paths below
             try:
                 response = client.images.generate(
                     model="gpt-image-1",
@@ -45,9 +46,8 @@ class handler(BaseHTTPRequestHandler):
                 image_b64 = response.data[0].b64_json
                 img = Image.open(BytesIO(base64.b64decode(image_b64)))
             except Exception as openai_err:
-                # Fallback: if gpt-image-1 also fails, try Replicate (FLUX) since the
-                # user has REPLICATE_API_TOKEN configured and the stylist pipeline
-                # already uses it.
+                # Fallback to Replicate FLUX (user has REPLICATE_API_TOKEN configured
+                # and the stylist pipeline already uses it).
                 replicate_token = os.environ.get("REPLICATE_API_TOKEN")
                 if not replicate_token:
                     raise openai_err
