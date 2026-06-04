@@ -62,12 +62,43 @@ class handler(BaseHTTPRequestHandler):
         try:
             mod = __import__(module_name)
             handler_cls = mod.handler
-            getattr(handler_cls, method)(self)
+            self._inject_helpers(handler_cls)
+            m = getattr(handler_cls, method, None)
+            if m is None:
+                fallback = 'do_GET' if method != 'do_GET' else 'do_POST'
+                m = getattr(handler_cls, fallback, None)
+            if m is None:
+                self.send_response(405)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'method_not_allowed', 'method': method}).encode())
+                return
+            m(self)
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'error': 'dispatch_failed', 'detail': str(e)}).encode())
+
+    _RESERVED_HANDLER_ATTRS = {
+        'do_GET', 'do_POST', 'do_OPTIONS', 'do_HEAD', 'do_PUT',
+        'do_DELETE', 'do_PATCH', 'do_TRACE', 'do_CONNECT',
+    }
+
+    def _inject_helpers(self, handler_cls):
+        for name in dir(handler_cls):
+            if name.startswith('_') or name in self._RESERVED_HANDLER_ATTRS:
+                continue
+            try:
+                attr = getattr(handler_cls, name)
+            except AttributeError:
+                continue
+            if not callable(attr):
+                continue
+            if hasattr(self, name):
+                continue
+            setattr(self, name, attr.__get__(self, type(self)))
 
     def do_GET(self):
         self._dispatch('do_GET')
