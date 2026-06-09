@@ -3,19 +3,15 @@ import os
 import json
 import base64
 from io import BytesIO
-from openai import OpenAI
 import requests
 from PIL import Image, ImageDraw
-
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+import replicate
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        # 1. READ THE INCOMING DATA (Critical for avoiding errors)
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
 
-        # 2. SEND BROWSER HEADERS
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*') 
@@ -24,47 +20,32 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            # 3. PARSE THE SIMPLE INPUTS
             data = json.loads(post_data)
             quote = data.get('quote') or data.get('slogan') or 'No Slogan'
             style = data.get('style', 'Streetwear')
             color = data.get('color', 'black')
             source_input = data.get('source_input', '')
 
-            # 4. GENERATE IMAGE (gpt-image-1 first, Replicate FLUX as fallback)
             color_clause = f", {color} ink on contrasting background" if color else ""
             source_clause = f", inspired by: {source_input}" if source_input else ""
-            image_url = None  # set in one of the two paths below
-            try:
-                response = client.images.generate(
-                    model="gpt-image-1",
-                    prompt=f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
-                    size="1024x1024",
-                    n=1,
-                )
-                # gpt-image-1 returns base64 directly (no URL)
-                image_b64 = response.data[0].b64_json
-                img = Image.open(BytesIO(base64.b64decode(image_b64)))
-            except Exception as openai_err:
-                # Fallback to Replicate FLUX (user has REPLICATE_API_TOKEN configured
-                # and the stylist pipeline already uses it).
-                replicate_token = os.environ.get("REPLICATE_API_TOKEN")
-                if not replicate_token:
-                    raise openai_err
-                import replicate
-                output = replicate.run(
-                    "black-forest-labs/flux-schnell",
-                    input={
-                        "prompt": f"Vector graphic logo design. High contrast, minimalist{color_clause}. Theme: {style}. Text: '{quote}'{source_clause}. No human faces, no photographic elements, clean vector lines, no watermarks.",
-                        "aspect_ratio": "1:1",
-                        "output_format": "jpg",
-                        "output_quality": 80
-                    }
-                )
-                # FLUX returns a URL (or list of URLs)
-                image_url = output[0] if isinstance(output, list) else output
-                img_response = requests.get(image_url)
-                img = Image.open(BytesIO(img_response.content))
+
+            prompt = (
+                f"Vector graphic logo design. High contrast, minimalist{color_clause}. "
+                f"Theme: {style}. Text: '{quote}'{source_clause}. "
+                f"No human faces, no photographic elements, clean vector lines, no watermarks."
+            )
+            output = replicate.run(
+                "black-forest-labs/flux-schnell",
+                input={
+                    "prompt": prompt,
+                    "aspect_ratio": "1:1",
+                    "output_format": "jpg",
+                    "output_quality": 80,
+                },
+            )
+            image_url = output[0] if isinstance(output, list) else output
+            img_response = requests.get(image_url)
+            img = Image.open(BytesIO(img_response.content))
 
             # 5. WATERMARK & PROCESS
             draw = ImageDraw.Draw(img)
