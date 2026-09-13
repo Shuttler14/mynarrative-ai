@@ -37,7 +37,8 @@
     },
     "api/fashion_services.py": {
       "maxDuration": 60,
-      "memory": 512
+      "memory": 512,
+      "includeFiles": "api/**"
     }
   },
   "rewrites": [

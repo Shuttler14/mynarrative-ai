@@ -1110,7 +1110,7 @@ def _handle_stylist_pipeline(body):
         return result
 
     if action == "upload_brand_catalog":
-            from brand_catalog import parse_catalog_file, upload_brand_catalog
+        from brand_catalog import parse_catalog_file, upload_brand_catalog
         brand_name = body.get("brand_name", "")
         marketplace = body.get("marketplace", "generic")
         file_content = body.get("file_content", "")
@@ -1137,12 +1137,12 @@ def _handle_stylist_pipeline(body):
         return {"success": True, "products": products, "count": len(products)}
 
     if action == "get_brand_catalogs":
-            from brand_catalog import get_brand_catalog_summary
+        from brand_catalog import get_brand_catalog_summary
         brands = get_brand_catalog_summary()
         return {"success": True, "brands": brands}
 
     if action == "delete_brand_catalog":
-            from brand_catalog import delete_brand_catalog
+        from brand_catalog import delete_brand_catalog
         brand = body.get("brand", "")
         if not brand:
             raise ValueError("brand name required")
