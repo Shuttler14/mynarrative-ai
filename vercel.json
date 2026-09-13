@@ -3,16 +3,41 @@
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
-        { "key": "Access-Control-Max-Age", "value": "86400" }
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains; preload" },
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, private" },
+        { "key": "Content-Security-Policy", "value": "default-src 'none'; frame-ancestors 'none'" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains; preload" }
       ]
     }
   ],
   "functions": {
-    "api/stylist_pipeline.py": {
-      "maxDuration": 120
+    "api/b2b_gateway.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/brand_search_api.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/syndicate/gateway.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/fashion_services.py": {
+      "maxDuration": 60,
+      "memory": 512
     }
   },
   "rewrites": [
@@ -22,19 +47,35 @@
     { "source": "/api/webhook/health",                 "destination": "/api/shopify_webhook" },
     { "source": "/api/webhook/design-order",           "destination": "/api/design_order_webhook" },
     { "source": "/api/webhook/design-order/health",    "destination": "/api/design_order_webhook" },
-    { "source": "/api/webhook/design-refund",          "destination": "/api/design_refund_webhook" },
-    { "source": "/api/webhook/design-refund/health",   "destination": "/api/design_refund_webhook" },
+    { "source": "/api/webhook/design-refund",          "destination": "/api/design_order_webhook" },
+    { "source": "/api/webhook/design-refund/health",   "destination": "/api/design_order_webhook" },
     { "source": "/api/designs",                        "destination": "/api/design_feed" },
+    { "source": "/api/design/feed",                    "destination": "/api/design_feed" },
+    { "source": "/api/design/feed/health",             "destination": "/api/design_feed" },
     { "source": "/api/design/process",                 "destination": "/api/design_pipeline" },
     { "source": "/api/design/pipeline/health",         "destination": "/api/design_pipeline" },
     { "source": "/api/design/publish",                 "destination": "/api/design_publish" },
     { "source": "/api/design/publish/health",          "destination": "/api/design_publish" },
-    { "source": "/api/design/feed",                    "destination": "/api/design_social_feed" },
-    { "source": "/api/design/feed/health",             "destination": "/api/design_social_feed" },
-    { "source": "/api/fulfillment/generate_gang_sheet","destination": "/api/fulfillment_generate_gang_sheet" },
+    { "source": "/api/fulfillment/generate_gang_sheet","destination": "/api/design_pipeline" },
     { "source": "/api/creator/earnings",               "destination": "/api/creator_earnings" },
     { "source": "/api/creator/earnings/summary",       "destination": "/api/creator_earnings" },
     { "source": "/api/creator/earnings/health",         "destination": "/api/creator_earnings" },
-    { "source": "/api/creator/(.*)",                   "destination": "/api/creator_economy" }
+    { "source": "/api/creator/(.*)",                   "destination": "/api/creator_economy" },
+    { "source": "/api/image/:path*",                   "destination": "/api/image_services" },
+    { "source": "/api/fashion/:path*",                 "destination": "/api/fashion_services" },
+    { "source": "/api/shopify/:path*",                 "destination": "/api/shopify_webhook" },
+
+    { "source": "/api/widget/bootstrap",               "destination": "/api/b2b_gateway" },
+    { "source": "/api/widget/event",                   "destination": "/api/b2b_gateway" },
+    { "source": "/api/user/identify",                  "destination": "/api/b2b_gateway" },
+    { "source": "/api/closet/upload",                  "destination": "/api/b2b_gateway" },
+    { "source": "/api/closet/items",                   "destination": "/api/b2b_gateway" },
+    { "source": "/api/recommend",                      "destination": "/api/b2b_gateway" },
+    { "source": "/api/health",                         "destination": "/api/b2b_gateway" },
+    { "source": "/api/brand/search",                   "destination": "/api/brand_search_api" },
+    { "source": "/api/brand/search-for-occasion",      "destination": "/api/brand_search_api" },
+    { "source": "/api/brand/catalogs",                 "destination": "/api/brand_search_api" },
+    { "source": "/api/syndicate/:path*",               "destination": "/api/syndicate/gateway" },
+    { "source": "/api/brand/register",                 "destination": "/api/b2b_gateway" }
   ]
 }
