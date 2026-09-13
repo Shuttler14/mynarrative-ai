@@ -14,7 +14,7 @@ from api.security import (
     check_rate_limit, get_client_ip, sanitize_body, validate_api_key_format,
     is_bot_request, sign_request, verify_request_signature,
 )
-from api.core.auth import validate_api_key, create_session_token
+from api.core import validate_api_key, create_session_token
 from api.core.supabase import sb_request
 from api.widget.bootstrap import handle_bootstrap
 from api.user.identify import handle_identify

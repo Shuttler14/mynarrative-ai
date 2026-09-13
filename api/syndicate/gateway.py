@@ -11,7 +11,7 @@ from api.security import (
     sanitize_body, security_headers, is_bot_request,
     verify_request_signature, validate_api_key_format,
 )
-from api.core.auth import validate_api_key
+from api.core import validate_api_key
 from api.syndicate import (
     get_syndicate_rules, update_syndicate_rules,
     request_pairing, approve_pairing, reject_pairing, get_brand_partners,
