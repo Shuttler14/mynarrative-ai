@@ -152,7 +152,7 @@ def run():
         print("\nSet these in mynarrative-ai/.env or as system env vars:")
         print("   SHOPIFY_STORE_URL=mynarrative.myshopify.com")
         print("   SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxx")
-        print("   VERCEL_DEPLOYMENT_URL=https://mynarrative-ai.vercel.app")
+        print("   VERCEL_DEPLOYMENT_URL=https://drishti-api-blond.vercel.app")
         sys.exit(1)
 
     print(f"\n  Store:      {SHOPIFY_STORE_URL}")

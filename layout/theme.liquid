@@ -92,6 +92,9 @@
   
   {% comment %} Analytics - Defer content square to not block LCP {% endcomment %}
   <script src="https://t.contentsquare.net/uxa/cb9033d27c6d3.js" defer></script>
+
+  {% comment %} Multi-Currency Converter — auto-converts INR prices based on visitor's country {% endcomment %}
+  <script src="{{ 'currency-converter.js' | asset_url }}" defer></script>
 </head>
 
 <body>

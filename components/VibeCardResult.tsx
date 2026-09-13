@@ -127,6 +127,33 @@ const SLOT_ICONS: Record<string, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CURRENCY HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+    INR: "\u20B9",
+    USD: "$",
+    GBP: "\u00A3",
+    EUR: "\u20AC",
+    AED: "د.إ",
+    AUD: "A$",
+};
+
+function getCurrencySymbol(code: string): string {
+    return CURRENCY_SYMBOLS[code] || CURRENCY_SYMBOLS["INR"];
+}
+
+function formatPrice(amount: number, currencyCode: string): string {
+    const symbol = getCurrencySymbol(currencyCode);
+    const decimals = currencyCode === "INR" ? 0 : 2;
+    const formatted = amount.toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+    });
+    return `${symbol}${formatted}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPONENT: VibeCardResult
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -407,10 +434,10 @@ const VibeCardResult: React.FC<VibeCardResultProps> = ({
                                             {/* Price */}
                                             <div className="flex items-center gap-2">
                                                 <span className="text-white font-bold text-lg">
-                                                    ₹{upsell.price.toLocaleString("en-IN")}
+                                                    {formatPrice(upsell.price, upsell.currency || "INR")}
                                                 </span>
                                                 <span className="text-gray-500 text-sm line-through">
-                                                    ₹{upsell.original_price.toLocaleString("en-IN")}
+                                                    {formatPrice(upsell.original_price, upsell.currency || "INR")}
                                                 </span>
                                                 <span className="text-green-400 text-xs font-bold">
                                                     {upsell.discount_pct}% OFF

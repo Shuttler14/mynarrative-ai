@@ -40,12 +40,24 @@ import VibeCardResult from "./VibeCardResult";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Occasion option for Step 1A */
+interface PriceTier {
+    id: string;
+    label: string;
+    range: string;
+    brands: {
+        global: string[];
+        indian: string[];
+    };
+}
+
 interface Occasion {
     id: string;
     label: string;
     emoji: string;
-    gradient: string; // Tailwind gradient classes
+    gradient: string;
     description: string;
+    style: string;
+    priceTiers: PriceTier[];
 }
 
 /** Vibe card for Step 1B (Tinder-like swiping) */
@@ -139,8 +151,10 @@ interface PipelineResponse {
 /** The combined flow state passed between steps */
 interface FlowState {
     occasion: string | null;
+    priceTier: string | null;
+    selectedBrands: string[];
     vibeId: string | null;
-    userImage: string | null; // Base64 encoded
+    userImage: string | null;
     userImageFile: File | null;
     pipelineResult: PipelineResponse | null;
 }
@@ -156,6 +170,21 @@ const OCCASIONS: Occasion[] = [
         emoji: "🌙",
         gradient: "from-rose-500 via-pink-600 to-purple-700",
         description: "Romantic vibes, elevated style",
+        style: "Party & Evening Wear",
+        priceTiers: [
+            {
+                id: "value", label: "Value", range: "Under ₹1,500",
+                brands: { global: ["Berrylush", "SASSAFRAS", "Athena", "Tokyo Talkies"], indian: ["FabAlley", "Zudio Party", "Mango Edit", "SASSAFRAS"] },
+            },
+            {
+                id: "premium", label: "Premium", range: "₹1,500 – ₹3,500",
+                brands: { global: ["Kazo", "Twenty Dresses", "Rareism", "Mango"], indian: ["Vero Moda", "RSVP", "Rareism", "Twenty Dresses"] },
+            },
+            {
+                id: "luxury", label: "Luxury", range: "Above ₹3,500",
+                brands: { global: ["ASOS Design", "Revolve", "House of CB", "Forever New"], indian: ["Bebe", "Zara Studio", "House of CB", "Revolve"] },
+            },
+        ],
     },
     {
         id: "office",
@@ -163,6 +192,21 @@ const OCCASIONS: Occasion[] = [
         emoji: "💼",
         gradient: "from-slate-600 via-blue-700 to-indigo-800",
         description: "Sharp, smart, ready to lead",
+        style: "Formal & Office Wear",
+        priceTiers: [
+            {
+                id: "value", label: "Value", range: "Under ₹1,500",
+                brands: { global: ["Peter England", "Max Fashion", "Netplay", "Code"], indian: ["Zudio", "Excalibur", "Peter England", "Max Fashion"] },
+            },
+            {
+                id: "premium", label: "Premium", range: "₹1,500 – ₹3,500",
+                brands: { global: ["Van Heusen", "Allen Solly", "Louis Philippe", "Arrow"], indian: ["Marks & Spencer", "FableStreet", "Van Heusen", "Allen Solly"] },
+            },
+            {
+                id: "luxury", label: "Luxury", range: "Above ₹3,500",
+                brands: { global: ["Brooks Brothers", "Hugo Boss", "Massimo Dutti", "Calvin Klein"], indian: ["Raymond", "Tommy Hilfiger", "Hugo Boss", "Brooks Brothers"] },
+            },
+        ],
     },
     {
         id: "sangeet",
@@ -170,6 +214,21 @@ const OCCASIONS: Occasion[] = [
         emoji: "💃",
         gradient: "from-amber-500 via-orange-600 to-red-700",
         description: "Festive, bold, unapologetically desi",
+        style: "Ethnic & Festive Wear",
+        priceTiers: [
+            {
+                id: "value", label: "Value", range: "Under ₹1,500",
+                brands: { global: ["Anouk", "Libas", "Sangria", "Vishudh"], indian: ["Aurelia", "Soch", "Anouk", "Libas"] },
+            },
+            {
+                id: "premium", label: "Premium", range: "₹1,500 – ₹3,500",
+                brands: { global: ["BIBA", "W for Woman", "Global Desi", "Fabindia"], indian: ["Indya", "Koskii", "BIBA", "W for Woman"] },
+            },
+            {
+                id: "luxury", label: "Luxury", range: "Above ₹3,500",
+                brands: { global: ["Kalki Fashion", "Manyavar", "Ritu Kumar", "Anita Dongre"], indian: ["House of Masaba", "Nalli", "Kalki Fashion", "Manyavar"] },
+            },
+        ],
     },
     {
         id: "airport_look",
@@ -177,6 +236,21 @@ const OCCASIONS: Occasion[] = [
         emoji: "✈️",
         gradient: "from-cyan-500 via-teal-600 to-emerald-700",
         description: "Comfort that still serves looks",
+        style: "Travel & Utility Wear",
+        priceTiers: [
+            {
+                id: "value", label: "Value", range: "Under ₹1,500",
+                brands: { global: ["Quechua", "Forclaz", "Wildcraft", "Bombay Trooper"], indian: ["Trekman", "Fuaark", "Quechua", "Forclaz"] },
+            },
+            {
+                id: "premium", label: "Premium", range: "₹1,500 – ₹3,500",
+                brands: { global: ["Gokyo", "Columbia", "WROGN", "Woodland"], indian: ["Royal Enfield", "Quiksilver", "Gokyo", "Columbia"] },
+            },
+            {
+                id: "luxury", label: "Luxury", range: "Above ₹3,500",
+                brands: { global: ["The North Face", "Patagonia", "Arc'teryx", "Vuori"], indian: ["Salomon", "Columbia Tech", "The North Face", "Patagonia"] },
+            },
+        ],
     },
 ];
 
@@ -265,13 +339,15 @@ const staggerItem = {
 const AIStylistFlow: React.FC = () => {
     // ─── STATE ───
     const [currentStep, setCurrentStep] = useState<number>(1);
-    const [subStep, setSubStep] = useState<"A" | "B">("A"); // For Step 1's two screens
+    const [subStep, setSubStep] = useState<"A" | "B" | "C">("A"); // A=occasion, B=price/brand, C=vibe
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showResultModal, setShowResultModal] = useState(false);
 
     const [flowState, setFlowState] = useState<FlowState>({
         occasion: null,
+        priceTier: null,
+        selectedBrands: [],
         vibeId: null,
         userImage: null,
         userImageFile: null,
@@ -319,9 +395,11 @@ const AIStylistFlow: React.FC = () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     action: "full_pipeline",
-                    user_id: "user_" + Date.now(), // In production, use real Shopify customer ID
+                    user_id: "user_" + Date.now(),
                     occasion: flowState.occasion,
                     vibe_id: flowState.vibeId,
+                    price_tier: flowState.priceTier,
+                    preferred_brands: flowState.selectedBrands,
                     user_image: flowState.userImage,
                 }),
             });
@@ -349,8 +427,29 @@ const AIStylistFlow: React.FC = () => {
 
     /** Step 1A: Select occasion */
     const handleOccasionSelect = (occasionId: string) => {
-        setFlowState((prev) => ({ ...prev, occasion: occasionId }));
-        setSubStep("B"); // Transition to vibe selection
+        setFlowState((prev) => ({ ...prev, occasion: occasionId, priceTier: null, selectedBrands: [] }));
+        setSubStep("B"); // Transition to price/brand selection
+    };
+
+    /** Step 1B: Select price tier */
+    const handlePriceTierSelect = (tierId: string) => {
+        setFlowState((prev) => ({ ...prev, priceTier: tierId, selectedBrands: [] }));
+    };
+
+    /** Step 1B: Toggle brand selection */
+    const handleBrandToggle = (brand: string) => {
+        setFlowState((prev) => {
+            const current = prev.selectedBrands || [];
+            const updated = current.includes(brand)
+                ? current.filter((b) => b !== brand)
+                : [...current, brand];
+            return { ...prev, selectedBrands: updated };
+        });
+    };
+
+    /** Step 1B: Confirm price/brand and move to vibe */
+    const handlePriceBrandConfirm = () => {
+        setSubStep("C"); // Transition to vibe selection
     };
 
     /** Step 1B: Swipe / select vibe card */
@@ -564,12 +663,16 @@ const AIStylistFlow: React.FC = () => {
     );
 
     // ─────────────────────────────────────────────────────────────────────────
-    // RENDER: STEP 1B — Vibe Check (Tinder-like swipeable cards)
+    // RENDER: STEP 1B — Price Range & Brand Selection
     // ─────────────────────────────────────────────────────────────────────────
 
     const renderStep1B = () => {
-        const currentVibe = VIBE_CARDS[currentVibeIndex];
-        const isLast = currentVibeIndex >= VIBE_CARDS.length - 1;
+        const selectedOccasion = OCCASIONS.find((o) => o.id === flowState.occasion);
+        if (!selectedOccasion) return null;
+
+        const activeTier = flowState.priceTier;
+        const activeTierData = selectedOccasion.priceTiers.find((t) => t.id === activeTier);
+        const hasBrandsSelected = (flowState.selectedBrands || []).length > 0;
 
         return (
             <motion.div
@@ -583,10 +686,167 @@ const AIStylistFlow: React.FC = () => {
             >
                 {/* Header */}
                 <motion.div
+                    initial={{ opacity: 0, y: -30 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-center mb-8 w-full max-w-lg"
+                >
+                    <button
+                        onClick={() => setSubStep("A")}
+                        className="absolute left-4 top-8 text-white/40 hover:text-white/70 transition-colors text-sm flex items-center gap-1"
+                    >
+                        ← Back
+                    </button>
+                    <p className="text-purple-300 text-sm font-medium mb-2 uppercase tracking-wider">
+                        {selectedOccasion.emoji} {selectedOccasion.style}
+                    </p>
+                    <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-white via-purple-200 to-pink-200 bg-clip-text text-transparent mb-3">
+                        Set your budget
+                    </h1>
+                    <p className="text-gray-400 text-base">
+                        Pick a range. We'll show brands that fit.
+                    </p>
+                </motion.div>
+
+                {/* Price Tier Tabs */}
+                <div className="flex gap-2 mb-6 w-full max-w-lg">
+                    {selectedOccasion.priceTiers.map((tier) => (
+                        <button
+                            key={tier.id}
+                            onClick={() => handlePriceTierSelect(tier.id)}
+                            className={`flex-1 py-3 px-3 rounded-xl text-sm font-semibold transition-all duration-300 border ${
+                                activeTier === tier.id
+                                    ? "bg-white/15 border-white/40 text-white shadow-lg shadow-purple-500/10"
+                                    : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white/70"
+                            }`}
+                        >
+                            <span className="block text-xs text-white/40 mb-0.5">{tier.label}</span>
+                            <span className="block text-[11px] font-normal">{tier.range}</span>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Brand Grid — visible only when a tier is selected */}
+                {activeTierData && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="w-full max-w-lg"
+                    >
+                        <p className="text-white/30 text-xs uppercase tracking-wider mb-3 font-medium">
+                            Tap brands you like
+                        </p>
+
+                        {/* Indian Brands */}
+                        <p className="text-white/50 text-[10px] uppercase tracking-wider mb-1.5 font-medium">Indian</p>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            {activeTierData.brands.indian.map((brand) => {
+                                const isSelected = (flowState.selectedBrands || []).includes(brand);
+                                return (
+                                    <button
+                                        key={`in-${brand}`}
+                                        onClick={() => handleBrandToggle(brand)}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 border ${
+                                            isSelected
+                                                ? "bg-purple-500/30 border-purple-400/60 text-white shadow-lg shadow-purple-500/20"
+                                                : "bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white/80"
+                                        }`}
+                                    >
+                                        {isSelected && <span className="mr-1">✓</span>}
+                                        {brand}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Global Brands */}
+                        <p className="text-white/50 text-[10px] uppercase tracking-wider mb-1.5 font-medium">Global</p>
+                        <div className="flex flex-wrap gap-2 mb-6">
+                            {activeTierData.brands.global.map((brand) => {
+                                const isSelected = (flowState.selectedBrands || []).includes(brand);
+                                return (
+                                    <button
+                                        key={`gl-${brand}`}
+                                        onClick={() => handleBrandToggle(brand)}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 border ${
+                                            isSelected
+                                                ? "bg-purple-500/30 border-purple-400/60 text-white shadow-lg shadow-purple-500/20"
+                                                : "bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white/80"
+                                        }`}
+                                    >
+                                        {isSelected && <span className="mr-1">✓</span>}
+                                        {brand}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Continue button */}
+                        <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={handlePriceBrandConfirm}
+                            className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all duration-300 ${
+                                hasBrandsSelected
+                                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50"
+                                    : "bg-white/10 text-white/50 border border-white/10"
+                            }`}
+                        >
+                            {hasBrandsSelected
+                                ? `Continue with ${flowState.selectedBrands!.length} brand${flowState.selectedBrands!.length > 1 ? "s" : ""}`
+                                : "Skip — surprise me"}
+                        </motion.button>
+                    </motion.div>
+                )}
+
+                {/* Progress indicator */}
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.8 }}
+                    className="mt-10 flex items-center gap-2"
+                >
+                    <div className="w-8 h-1.5 rounded-full bg-white/20" />
+                    <div className="w-8 h-1.5 rounded-full bg-purple-500" />
+                    <div className="w-8 h-1.5 rounded-full bg-white/20" />
+                    <div className="w-8 h-1.5 rounded-full bg-white/20" />
+                    <div className="w-8 h-1.5 rounded-full bg-white/20" />
+                </motion.div>
+            </motion.div>
+        );
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RENDER: STEP 1C — Vibe Check (Tinder-like swipeable cards)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const renderStep1C = () => {
+        const currentVibe = VIBE_CARDS[currentVibeIndex];
+        const isLast = currentVibeIndex >= VIBE_CARDS.length - 1;
+
+        return (
+            <motion.div
+                key="step1c"
+                variants={pageVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={pageTransition}
+                className="min-h-screen flex flex-col items-center justify-center px-4 py-8"
+            >
+                {/* Header */}
+                <motion.div
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="text-center mb-8"
+                    className="text-center mb-8 w-full max-w-sm relative"
                 >
+                    <button
+                        onClick={() => setSubStep("B")}
+                        className="absolute left-0 top-0 text-white/40 hover:text-white/70 transition-colors text-sm flex items-center gap-1"
+                    >
+                        ← Back
+                    </button>
                     <p className="text-purple-400 text-sm font-medium uppercase tracking-widest mb-2">
                         Vibe Check
                     </p>
@@ -1166,9 +1426,10 @@ const AIStylistFlow: React.FC = () => {
             {/* Main content */}
             <div className="relative z-10">
                 <AnimatePresence mode="wait">
-                    {/* Step 1: Occasion + Vibe */}
+                    {/* Step 1: Occasion + Price/Brand + Vibe */}
                     {currentStep === 1 && subStep === "A" && renderStep1A()}
                     {currentStep === 1 && subStep === "B" && renderStep1B()}
+                    {currentStep === 1 && subStep === "C" && renderStep1C()}
 
                     {/* Step 2: Image Upload */}
                     {currentStep === 2 && renderStep2()}
