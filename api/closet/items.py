@@ -3,20 +3,25 @@ import json
 import os
 import urllib.request
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+def _get_supabase_url():
+    return os.environ.get("SUPABASE_URL", "")
+
+def _get_supabase_key():
+    return os.environ.get("SUPABASE_KEY", "")
 
 
 def _sb_request(method, path, payload=None):
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    supabase_url = _get_supabase_url()
+    supabase_key = _get_supabase_key()
+    if not supabase_url or not supabase_key:
         return None
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json"
     }
     body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(f"{SUPABASE_URL.rstrip('/')}{path}", data=body, headers=headers, method=method)
+    req = urllib.request.Request(f"{supabase_url.rstrip('/')}{path}", data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode() or "null")

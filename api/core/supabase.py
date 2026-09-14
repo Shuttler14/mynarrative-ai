@@ -3,22 +3,29 @@ import json
 import os
 import urllib.request
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
+def _get_supabase_url():
+    return os.environ.get("SUPABASE_URL", "")
+
+
+def _get_supabase_key():
+    return os.environ.get("SUPABASE_KEY", "")
 
 
 def sb_request(method: str, path: str, payload=None):
     """Make an authenticated request to Supabase REST API."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    url = _get_supabase_url()
+    key = _get_supabase_key()
+    if not url or not key:
         return None
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
-        f"{SUPABASE_URL.rstrip('/')}{path}",
+        f"{url.rstrip('/')}{path}",
         data=body, headers=headers, method=method,
     )
     try:

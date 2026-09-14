@@ -143,14 +143,24 @@ class handler(BaseHTTPRequestHandler):
                     self._respond(401, {"error": "invalid_api_key"})
                     return
 
-                # Check subscription
+                # Check subscription — auto-create trial if missing
                 sub_status = handle_subscription_status(brand_id)
                 if sub_status.get("status") not in ("active", "trialing"):
-                    self._respond(403, {
-                        "error": "subscription_expired",
-                        "redirect_url": f"https://mynarrative.store/brand/{sub_status.get('slug', '')}"
+                    # Auto-create a 14-day trial subscription
+                    from datetime import datetime, timedelta
+                    now = datetime.utcnow()
+                    trial_end = now + timedelta(days=14)
+                    sb_request("POST", "/rest/v1/brand_subscriptions", {
+                        "brand_id": brand_id,
+                        "plan_tier": "starter",
+                        "status": "trialing",
+                        "trial_end": trial_end.isoformat() + "Z",
+                        "current_period_start": now.isoformat() + "Z",
+                        "current_period_end": trial_end.isoformat() + "Z",
+                        "monthly_recommendations_limit": 1000,
+                        "monthly_recommendations_used": 0,
                     })
-                    return
+                    sub_status["status"] = "trialing"
 
                 # Sanitize body per-endpoint
                 if path == "/api/widget/event":

@@ -38,23 +38,33 @@ from api.recommend.explainability import (
     generate_item_reasoning, generate_outfit_title,
 )
 
+try:
+    from api.brand_catalog import search_brand_products
+except ImportError:
+    search_brand_products = None
+
 # ── Supabase Helper ────────────────────────────────────────────────────────
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+def _get_supabase_url():
+    return os.environ.get("SUPABASE_URL", "")
+
+def _get_supabase_key():
+    return os.environ.get("SUPABASE_KEY", "")
 
 
 def _sb_request(method: str, path: str, payload: dict = None) -> Optional[dict | list]:
     """Raw Supabase REST request."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    supabase_url = _get_supabase_url()
+    supabase_key = _get_supabase_key()
+    if not supabase_url or not supabase_key:
         return None
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
     }
     body = json.dumps(payload).encode() if payload else None
-    url = f"{SUPABASE_URL.rstrip('/')}{path}"
+    url = f"{supabase_url.rstrip('/')}{path}"
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -337,6 +347,7 @@ def handle_recommend(body: dict) -> dict:
             budget=budget,
             body_shape=body_shape,
             user_context=user_context,
+            brand_id=brand_id,
         )
 
         # Generate reasoning for each outfit
@@ -398,6 +409,93 @@ def handle_recommend(body: dict) -> dict:
         return {"error": str(e)}
 
 
+def _enrich_items_with_purchase_urls(items: list[dict], brand_id: str = "") -> list[dict]:
+    """
+    Enrich product items with purchase URLs and price comparison data.
+    Looks up products in brand catalog and global inventory for multi-source pricing.
+    """
+    enriched = []
+    for item in items:
+        product = dict(item)
+        product_id = product.get("id", "")
+        title = product.get("title", "")
+        brand = product.get("brand", "")
+        price = float(product.get("price", 0))
+
+        # Build purchase links from available data
+        purchase_links = []
+
+        # 1. Direct product URL from brand_products table
+        if product.get("product_url"):
+            purchase_links.append({
+                "platform": brand or "Brand Store",
+                "url": product["product_url"],
+                "price": price,
+                "is_best": True,
+                "delivery": "Brand Direct",
+                "rating": None,
+            })
+
+        # 2. Affiliate URL if available
+        if product.get("affiliate_url") and product["affiliate_url"] != product.get("product_url"):
+            purchase_links.append({
+                "platform": "Affiliate Partner",
+                "url": product["affiliate_url"],
+                "price": price,
+                "is_best": False,
+                "delivery": "Marketplace",
+                "rating": None,
+            })
+
+        # 3. Try to find on multiple marketplaces via brand catalog search
+        if title and not purchase_links and search_brand_products:
+            try:
+                catalog_results = search_brand_products(
+                    brand=brand, limit=5, currency="INR"
+                )
+                for cp in catalog_results:
+                    cp_title = cp.get("title", "").lower()
+                    if title.lower()[:15] in cp_title or cp_title[:15] in title.lower():
+                        cp_price = float(cp.get("price", 0))
+                        purchase_links.append({
+                            "platform": cp.get("marketplace_source", "Marketplace"),
+                            "url": cp.get("product_url", cp.get("image_url", "")),
+                            "price": cp_price,
+                            "is_best": False,
+                            "delivery": "2-5 days",
+                            "rating": cp.get("rating"),
+                        })
+            except Exception:
+                pass
+
+        # 4. If still no links, construct a Shopify product URL from brand domain
+        if not purchase_links and brand:
+            slug = brand.lower().replace(" ", "-")
+            purchase_links.append({
+                "platform": brand,
+                "url": f"https://{slug}.com",
+                "price": price,
+                "is_best": True,
+                "delivery": "Check store",
+                "rating": None,
+            })
+
+        # Mark the best price option
+        if purchase_links:
+            best_link = min(purchase_links, key=lambda x: x.get("price", float("inf")))
+            for link in purchase_links:
+                link["is_best"] = link == best_link
+
+        product["purchase_links"] = purchase_links
+        product["best_price"] = min((l["price"] for l in purchase_links), default=price)
+        product["best_platform"] = next(
+            (l["platform"] for l in purchase_links if l["is_best"]), brand or ""
+        )
+        enriched.append(product)
+
+    return enriched
+
+
 def _assemble_final_outfits(
     primary_items: list[dict],
     exploration_items: list[dict],
@@ -407,6 +505,7 @@ def _assemble_final_outfits(
     budget: dict,
     body_shape: str,
     user_context: str,
+    brand_id: str = "",
 ) -> list[dict]:
     """Assemble final outfits from scored items."""
     kg = get_knowledge_graph()
@@ -463,6 +562,9 @@ def _assemble_final_outfits(
             for item in outfit_items:
                 clean = {k: v for k, v in item.items() if not k.startswith("_")}
                 clean_items.append(clean)
+
+            # Enrich with purchase URLs
+            clean_items = _enrich_items_with_purchase_urls(clean_items, brand_id)
 
             outfits.append({
                 "items": clean_items,

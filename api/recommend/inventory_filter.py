@@ -8,13 +8,18 @@ import os
 import urllib.request
 from typing import Optional
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+def _get_supabase_url():
+    return os.environ.get("SUPABASE_URL", "")
+
+def _get_supabase_key():
+    return os.environ.get("SUPABASE_KEY", "")
 
 
 def _sb_query(table: str, filters: dict, select: str = "*", limit: int = 200) -> list[dict]:
     """Query Supabase with filters."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    supabase_url = _get_supabase_url()
+    supabase_key = _get_supabase_key()
+    if not supabase_url or not supabase_key:
         return []
 
     params = [f"select={select}", f"limit={limit}"]
@@ -31,10 +36,10 @@ def _sb_query(table: str, filters: dict, select: str = "*", limit: int = 200) ->
         else:
             params.append(f"{k}=eq.{v}")
 
-    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table}?{'&'.join(params)}"
+    url = f"{supabase_url.rstrip('/')}/rest/v1/{table}?{'&'.join(params)}"
     req = urllib.request.Request(url, headers={
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
     })
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
