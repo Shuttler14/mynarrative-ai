@@ -1,236 +1,473 @@
-"""Recommendation handler — generate outfit recommendations."""
+"""
+Recommendation Generator — Full pipeline orchestrator.
+Implements the 7-stage recommendation pipeline:
+1. Intent Detection → 2. Inventory Filter → 3. Knowledge Graph →
+4. Outfit Assembly + Embeddings → 5. Scoring → 6. Exploration → 7. Explainability
+"""
+from __future__ import annotations
 import json
 import os
+import sys
 import urllib.request
+from typing import Optional
+
+# Ensure parent directory is importable
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from api.recommend.intent_detection import build_user_profile
+from api.recommend.inventory_filter import (
+    filter_brand_products, filter_closet_items, filter_partner_products,
+    get_product_price, check_stock,
+)
+from api.recommend.knowledge_graph import get_knowledge_graph, Category
+from api.recommend.embeddings import (
+    generate_product_embedding, generate_query_embedding,
+    generate_closet_embedding, extract_attributes, build_enriched_description,
+)
+from api.recommend.outfit_assembly import (
+    OutfitBuilder, build_outfit_from_anchor, build_outfit_from_scratch,
+)
+from api.recommend.scoring import (
+    score_products, diversify_results, score_product,
+)
+from api.recommend.exploration import (
+    allocate_brand_slots, record_impression, select_brand_for_exploration,
+)
+from api.recommend.explainability import (
+    generate_llm_reasoning, generate_rule_based_reasoning,
+    generate_item_reasoning, generate_outfit_title,
+)
+
+# ── Supabase Helper ────────────────────────────────────────────────────────
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 
-def _sb_request(method, path, payload=None):
+def _sb_request(method: str, path: str, payload: dict = None) -> Optional[dict | list]:
+    """Raw Supabase REST request."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         return None
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
     body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(f"{SUPABASE_URL.rstrip('/')}{path}", data=body, headers=headers, method=method)
+    url = f"{SUPABASE_URL.rstrip('/')}{path}"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode() or "null")
+            raw = resp.read().decode() or "null"
+            return json.loads(raw)
     except Exception:
         return None
 
 
-def _get_text_embedding(text: str) -> list:
-    """Generate text embedding using OpenAI."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return []
-    try:
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-        emb = client.embeddings.create(model="text-embedding-3-small", input=text)
-        return emb.data[0].embedding if emb and emb.data else []
-    except Exception:
-        return []
-
-
-def _match_brand_products(brand_id: str, query_embedding: list, category: str = "", price_min: float = 0, price_max: float = 999999, limit: int = 6) -> list:
-    """Search brand products by embedding similarity."""
-    if not query_embedding:
-        return []
-
+def _match_brand_products(
+    brand_id: str,
+    query_embedding: list[float],
+    category: str = "",
+    price_min: float = 0,
+    price_max: float = 999999,
+    match_count: int = 20,
+) -> list[dict]:
+    """Vector similarity search via Supabase RPC."""
     payload = {
+        "query_embedding": json.dumps(query_embedding),
         "p_brand_id": brand_id,
-        "query_embedding": query_embedding,
-        "query_category": category or None,
-        "query_price_min": price_min if price_min > 0 else None,
-        "query_price_max": price_max if price_max < 999999 else None,
-        "match_count": min(limit, 20)
+        "p_match_count": match_count,
+        "p_category": category or None,
+        "p_price_min": price_min,
+        "p_price_max": price_max,
     }
     result = _sb_request("POST", "/rest/v1/rpc/match_brand_products", payload)
     return result if isinstance(result, list) else []
 
 
-def _match_closet_items(user_id: str, query_embedding: list, category: str = "", limit: int = 4) -> list:
-    """Search user's closet items by embedding similarity."""
-    if not query_embedding or not user_id:
-        return []
-
+def _match_closet_items(
+    user_id: str,
+    query_embedding: list[float],
+    category: str = "",
+    match_count: int = 10,
+) -> list[dict]:
+    """Vector similarity search for closet items."""
     payload = {
+        "query_embedding": json.dumps(query_embedding),
         "p_user_id": user_id,
-        "query_embedding": query_embedding,
-        "query_category": category or None,
-        "match_count": min(limit, 10)
+        "p_match_count": match_count,
+        "p_category": category or None,
     }
     result = _sb_request("POST", "/rest/v1/rpc/match_closet_items", payload)
     return result if isinstance(result, list) else []
 
 
-def _generate_outfit_reasoning(items: list, occasion: str) -> str:
-    """Use Gemini to generate reasoning for why items pair well."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return f"Perfect for {occasion}."
-
-    try:
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-
-        items_desc = "\n".join([f"- {item.get('title', '')} ({item.get('category', '')})" for item in items])
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{
-                "role": "user",
-                "content": f"You are a fashion stylist. Given these items for a {occasion} outfit, write 1-2 sentences explaining why they work together:\n{items_desc}"
-            }],
-            temperature=0.7,
-            max_tokens=100
-        )
-
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return f"Perfect for {occasion}."
-
+# ── Main Pipeline ──────────────────────────────────────────────────────────
 
 def handle_recommend(body: dict) -> dict:
-    """Generate outfit recommendations for a user on a brand's site.
-    Includes partner brand products via syndicate when brand doesn't cover all categories."""
-    brand_id = body.get("brand_id", "")
-    user_id = body.get("user_id", "")
-    occasion = body.get("occasion", "casual")
-    price_tier = body.get("price_tier", "mid")
-    include_closet = body.get("include_closet", False)
-    outfit_count = min(int(body.get("outfit_count", 3)), 4)
-
-    if not brand_id:
-        return {"error": "brand_id required"}
-
-    # Price tier to range mapping
-    price_ranges = {
-        "value": (0, 1500),
-        "budget": (0, 1500),
-        "mid": (1500, 3500),
-        "premium": (1500, 3500),
-        "luxury": (3500, 999999),
-        "high": (3500, 999999)
+    """
+    Main recommendation endpoint handler.
+    
+    Expected body:
+    {
+        "brand_id": "uuid",
+        "brand_name": "Zara",
+        "user_id": "uuid",
+        "occasion": "cocktail",
+        "price_tier": "premium",
+        "price_range_min": 1500,
+        "price_range_max": 3500,
+        "gender": "women",
+        "style": "classic",
+        "vibe": "clean girl",
+        "skin_tone": 5,
+        "body_shape": "hourglass",
+        "include_closet": true,
+        "outfit_count": 4,
+        "currency": "INR",
+        "anchor_item": { ... },
+        "user_context": "going to a cocktail party",
     }
-    price_min, price_max = price_ranges.get(price_tier, (0, 999999))
-
-    # Generate query embedding
-    query_text = f"{occasion} outfit {price_tier} budget"
-    query_embedding = _get_text_embedding(query_text)
-
-    # Search brand products
-    brand_products = _match_brand_products(brand_id, query_embedding, price_min=price_min, price_max=price_max, limit=outfit_count * 2)
-
-    # Search partner brand products via syndicate
-    partner_products = []
+    """
     try:
-        from api.syndicate import find_partner_products
-        partner_products = find_partner_products(brand_id, occasion=occasion, price_tier=price_tier, limit=outfit_count)
+        brand_id = body.get("brand_id", "")
+        brand_name = body.get("brand_name", "")
+        user_id = body.get("user_id", "")
+        occasion = body.get("occasion", "")
+        price_tier = body.get("price_tier", "premium")
+        price_range_min = float(body.get("price_range_min", 0))
+        price_range_max = float(body.get("price_range_max", 0))
+        gender = body.get("gender", "")
+        style = body.get("style", "")
+        vibe = body.get("vibe", "")
+        skin_tone = int(body.get("skin_tone", 0))
+        body_shape = body.get("body_shape", "")
+        include_closet = bool(body.get("include_closet", False))
+        outfit_count = min(int(body.get("outfit_count", 4)), 8)
+        currency = body.get("currency", "INR")
+        anchor_item = body.get("anchor_item")
+        user_context = body.get("user_context", "")
+
+        if not brand_id and not brand_name:
+            return {"error": "brand_id or brand_name required"}
+
+        kg = get_knowledge_graph()
+
+        # ── Stage 1: Intent Detection ──────────────────────────────────────
+        closet_items = []
+        if user_id and include_closet:
+            closet_items = filter_closet_items(user_id, limit=20)
+
+        profile = build_user_profile(
+            user_id=user_id,
+            occasion=occasion,
+            price_tier=price_tier,
+            price_range_min=price_range_min,
+            price_range_max=price_range_max,
+            gender=gender,
+            style=style,
+            vibe=vibe,
+            skin_tone=skin_tone,
+            body_shape=body_shape,
+            closet_items=closet_items,
+            anchor_item=anchor_item,
+            currency=currency,
+            user_context=user_context,
+        )
+
+        occasion_final = profile["occasion"]
+        style_final = profile["style_archetype"]
+        budget = profile["budget"]
+        gender_final = profile["gender"]
+
+        # ── Stage 2: Inventory Filter ──────────────────────────────────────
+        products = filter_brand_products(
+            brand_id=brand_id,
+            brand_name=brand_name,
+            gender=gender_final,
+            min_price=budget["min"],
+            max_price=budget["max"],
+            limit=60,
+        )
+
+        if not products:
+            # Retry without price filter
+            products = filter_brand_products(
+                brand_id=brand_id,
+                brand_name=brand_name,
+                gender=gender_final,
+                limit=60,
+            )
+
+        # ── Stage 3: Knowledge Graph Pre-filter ────────────────────────────
+        kg_filtered = []
+        for p in products:
+            if not check_stock(p):
+                continue
+            # Quick KG compatibility check
+            cat = p.get("category", "")
+            if cat and not kg.is_category_allowed(occasion_final, cat):
+                continue
+            color = p.get("color", "")
+            if color and not kg.is_color_allowed(occasion_final, color):
+                continue
+            kg_filtered.append(p)
+
+        if not kg_filtered:
+            kg_filtered = products  # Fallback: use all products
+
+        # ── Stage 4: Embeddings + Outfit Assembly ──────────────────────────
+        # Generate embeddings for all candidates
+        for p in kg_filtered:
+            emb_result = generate_product_embedding(p)
+            p["embedding_vector"] = emb_result["embedding"]
+            p["_attributes"] = emb_result["attributes"]
+
+        # Generate query embedding
+        query_text = f"{occasion_final} {style_final} outfit for {gender_final}"
+        query_embedding = generate_query_embedding(
+            query_text, occasion=occasion_final, style=style_final,
+            price_tier=budget["tier"]
+        )
+
+        # Build outfits
+        all_outfits = []
+
+        if anchor_item:
+            # Anchor-based outfit building
+            anchor_emb = generate_product_embedding(anchor_item)
+            anchor_item["embedding_vector"] = anchor_emb["embedding"]
+            anchor_item["_attributes"] = anchor_emb["attributes"]
+
+            outfit_result = build_outfit_from_anchor(
+                anchor=anchor_item,
+                occasion=occasion_final,
+                style=style_final,
+                candidate_products=kg_filtered,
+            )
+
+            # For each missing category, search for best matches
+            for query in outfit_result["search_queries"]:
+                cat = query.get("slot_category", "")
+                cat_products = [p for p in kg_filtered if p.get("category") == cat]
+                if not cat_products and cat:
+                    # Search with vector similarity
+                    cat_embedding = generate_query_embedding(
+                        f"{cat} for {occasion_final}",
+                        occasion=occasion_final, style=style_final
+                    )
+                    vector_matches = _match_brand_products(
+                        brand_id=brand_id,
+                        query_embedding=cat_embedding,
+                        category=cat,
+                        price_min=budget["min"],
+                        price_max=budget["max"],
+                        match_count=10,
+                    )
+                    cat_products = vector_matches
+
+                if cat_products:
+                    scored = score_products(
+                        cat_products,
+                        query_embedding=query_embedding,
+                        anchor=anchor_item,
+                        occasion=occasion_final,
+                        style=style_final,
+                        budget=budget,
+                    )
+                    top = scored[:2]
+                    for p in top:
+                        record_impression(p.get("brand", brand_name))
+                    all_outfits.extend(top)
+
+        else:
+            # No anchor — build outfits from scratch
+            scored_all = score_products(
+                kg_filtered,
+                query_embedding=query_embedding,
+                occasion=occasion_final,
+                style=style_final,
+                budget=budget,
+            )
+            diversified = diversify_results(scored_all, top_n=outfit_count * 3)
+            all_outfits = diversified
+
+        # ── Stage 5: Scoring (already done above, results are scored) ──────
+
+        # ── Stage 6: Exploration (B2B partner brand injection) ─────────────
+        partner_products = []
+        if brand_name:
+            partner_products = filter_partner_products(
+                host_brand=brand_name,
+                gender=gender_final,
+                min_price=budget["min"],
+                max_price=budget["max"],
+                limit=15,
+            )
+
+        # Inject exploration items from partner brands
+        exploration_items = []
+        if partner_products:
+            for pp in partner_products:
+                emb = generate_product_embedding(pp)
+                pp["embedding_vector"] = emb["embedding"]
+                pp["_attributes"] = emb["attributes"]
+                pp["_is_partner"] = True
+
+            scored_partners = score_products(
+                partner_products,
+                query_embedding=query_embedding,
+                anchor=anchor_item,
+                occasion=occasion_final,
+                style=style_final,
+                budget=budget,
+            )
+            exploration_items = scored_partners[:3]
+            for item in exploration_items:
+                record_impression(item.get("brand", ""))
+
+        # ── Stage 7: Outfit Assembly + Explainability ──────────────────────
+        # Group items into outfits
+        outfits = _assemble_final_outfits(
+            primary_items=all_outfits[:outfit_count * 2],
+            exploration_items=exploration_items,
+            outfit_count=outfit_count,
+            occasion=occasion_final,
+            style=style_final,
+            budget=budget,
+            body_shape=body_shape,
+            user_context=user_context,
+        )
+
+        # Generate reasoning for each outfit
+        for outfit in outfits:
+            items = outfit.get("items", [])
+            reasoning = generate_llm_reasoning(
+                outfit_items=items,
+                occasion=occasion_final,
+                style=style_final,
+                budget=budget,
+                body_shape=body_shape,
+                user_context=user_context,
+            )
+            outfit["reasoning"] = reasoning
+            outfit["title"] = generate_outfit_title(items, occasion_final)
+
+            # Score outfit coherence
+            outfit["coherence_score"] = kg.score_outfit_coherence(
+                items, occasion_final
+            )
+
+        # ── Session Persistence ────────────────────────────────────────────
+        session_data = {
+            "user_id": user_id,
+            "brand_id": brand_id,
+            "occasion": occasion_final,
+            "style": style_final,
+            "budget": budget,
+            "outfits": outfits,
+            "profile": profile,
+        }
+
+        session_id = ""
+        if user_id:
+            session_result = _sb_request("POST", "/rest/v1/recommendation_sessions", {
+                "user_id": user_id,
+                "brand_id": brand_id,
+                "session_data": session_data,
+                "outfit_count": len(outfits),
+            })
+            if session_result and isinstance(session_result, dict):
+                session_id = session_result.get("id", "")
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "outfits": outfits,
+            "count": len(outfits),
+            "profile": {
+                "occasion": occasion_final,
+                "style": style_final,
+                "budget_tier": budget["tier"],
+                "budget_target": budget["target"],
+            },
+            "partner_items": len(exploration_items),
+        }
+
     except Exception as e:
-        print(f"⚠️ [syndicate] {e}")
+        return {"error": str(e)}
 
-    # Combine brand + partner products
-    all_products = brand_products + partner_products
 
-    # Search user's closet if requested
-    closet_items = []
-    if include_closet and user_id:
-        closet_items = _match_closet_items(user_id, query_embedding, limit=outfit_count)
-
-    # Generate outfits (mix brand + partner + closet items)
+def _assemble_final_outfits(
+    primary_items: list[dict],
+    exploration_items: list[dict],
+    outfit_count: int,
+    occasion: str,
+    style: str,
+    budget: dict,
+    body_shape: str,
+    user_context: str,
+) -> list[dict]:
+    """Assemble final outfits from scored items."""
+    kg = get_knowledge_graph()
     outfits = []
+
+    # Group by category
+    by_category: dict[str, list[dict]] = {}
+    for item in primary_items:
+        cat = item.get("category", "unknown")
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(item)
+
+    # Build outfits by picking one from each category
+    categories_needed = ["top", "bottom", "footwear"]
+    if occasion in ("cocktail", "black_tie", "date_night", "gala", "wedding_guest"):
+        categories_needed = ["dress", "footwear"]
+
     for i in range(outfit_count):
         outfit_items = []
+        seen_brands = set()
 
-        # Add main brand product (if available)
-        if brand_products:
-            product_idx = i % len(brand_products)
-            product = brand_products[product_idx]
-            outfit_items.append({
-                "source": "brand_catalog",
-                "item_ref_id": str(product.get("id", "")),
-                "title": product.get("title", ""),
-                "image_url": product.get("image_url", ""),
-                "price": float(product.get("price", 0)),
-                "reason": "",
-                "is_gap_item": False,
-                "affiliate_url": "",
-                "brand_id": brand_id
+        for cat in categories_needed:
+            candidates = by_category.get(cat, [])
+            # Filter out items already used in this outfit
+            used_ids = {item.get("id", "") for item in outfit_items}
+            available = [c for c in candidates if c.get("id", "") not in used_ids]
+
+            if available:
+                # Pick the best one, trying to diversify brands
+                picked = None
+                for item in available:
+                    if item.get("brand", "") not in seen_brands:
+                        picked = item
+                        break
+                if not picked:
+                    picked = available[0]
+
+                outfit_items.append(picked)
+                seen_brands.add(picked.get("brand", ""))
+
+                # Remove from pool
+                by_category[cat] = [c for c in candidates if c.get("id", "") != picked.get("id", "")]
+
+        # Add exploration item if available
+        if exploration_items and i < len(exploration_items):
+            exp_item = exploration_items[i]
+            if exp_item.get("id", "") not in {item.get("id", "") for item in outfit_items}:
+                outfit_items.append(exp_item)
+
+        if outfit_items:
+            # Clean up internal fields
+            clean_items = []
+            for item in outfit_items:
+                clean = {k: v for k, v in item.items() if not k.startswith("_")}
+                clean_items.append(clean)
+
+            outfits.append({
+                "items": clean_items,
+                "total_price": sum(float(item.get("price", 0)) for item in clean_items),
+                "item_count": len(clean_items),
             })
 
-        # Add partner product (complementary item)
-        if partner_products and i < len(partner_products):
-            partner = partner_products[i]
-            outfit_items.append({
-                "source": "partner_brand",
-                "item_ref_id": str(partner.get("id", "")),
-                "title": partner.get("title", ""),
-                "image_url": partner.get("image_url", ""),
-                "price": float(partner.get("price", 0)),
-                "reason": f"Pairs perfectly with your {outfit_items[0].get('title', 'outfit')}",
-                "is_gap_item": True,
-                "affiliate_url": "",
-                "brand_id": partner.get("brand_id", ""),
-                "host_commission_rate": partner.get("host_commission_rate", 0.07)
-            })
-
-        # Add closet items if available
-        if closet_items and i < len(closet_items):
-            closet_item = closet_items[i]
-            outfit_items.append({
-                "source": "closet",
-                "item_ref_id": str(closet_item.get("id", "")),
-                "title": closet_item.get("description", "Your item"),
-                "image_url": closet_item.get("image_url", ""),
-                "price": 0,
-                "reason": "From your closet",
-                "is_gap_item": False,
-                "affiliate_url": ""
-            })
-
-        # Generate reasoning
-        reasoning = _generate_outfit_reasoning(outfit_items, occasion)
-
-        # Update reasons
-        for item in outfit_items:
-            if not item["reason"]:
-                item["reason"] = reasoning
-
-        total_price = sum(item.get("price", 0) for item in outfit_items if not item.get("is_gap_item"))
-
-        outfits.append({
-            "items": outfit_items,
-            "reasoning": reasoning,
-            "total_price": total_price,
-            "occasion_match_score": 0.85 + (i * 0.03),
-            "style_cohesion_score": 0.80 + (i * 0.02),
-            "has_partner_items": any(item.get("source") == "partner_brand" for item in outfit_items)
-        })
-
-    # Save session
-    session = _sb_request("POST", "/rest/v1/recommendation_sessions", {
-        "user_id": user_id,
-        "brand_id": brand_id,
-        "occasion": occasion,
-        "price_tier": price_tier,
-        "include_closet": include_closet,
-        "results": outfits,
-        "status": "completed"
-    })
-
-    session_id = session[0]["id"] if session and len(session) > 0 else None
-
-    return {
-        "session_id": session_id,
-        "outfits": outfits,
-        "closet_items_used": len(closet_items),
-        "brand_products_used": len(brand_products),
-        "partner_products_used": len(partner_products)
-    }
+    return outfits
