@@ -15,8 +15,7 @@ import time
 import math
 import threading
 import urllib.parse
-import urllib.request
-import urllib.error
+import requests
 from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -468,20 +467,18 @@ def _sb_request(method: str, path: str, payload: Any = None):
     if not url or not key:
         return None, "supabase_not_configured"
     full_url = f"{url.rstrip('/')}{path}"
-    body = None
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(full_url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = resp.read().decode("utf-8") or "null"
-            return json.loads(raw), None
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8")
-        except Exception:
-            detail = str(e)
-        return None, f"http_{e.code}:{detail[:260]}"
+        kwargs = {"headers": headers, "timeout": 20}
+        if payload is not None:
+            kwargs["json"] = payload
+        resp = requests.request(method, full_url, **kwargs)
+        resp.raise_for_status()
+        raw = resp.text or "null"
+        return json.loads(raw), None
+    except requests.exceptions.HTTPError as e:
+        detail = e.response.text[:260] if e.response else str(e)
+        code = e.response.status_code if e.response else 0
+        return None, f"http_{code}:{detail}"
     except Exception as e:
         return None, str(e)
 
@@ -494,21 +491,20 @@ def sb_upsert_global_inventory(rows: list):
     url, key, _ = _sb_headers()
     if not url or not key:
         return None, "supabase_not_configured"
-    req = urllib.request.Request(
-        f"{url.rstrip('/')}/rest/v1/global_inventory",
-        data=json.dumps(rows).encode("utf-8"),
-        headers=headers, method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8") or "[]")
-            return {"inserted": len(data) if isinstance(data, list) else len(rows)}, None
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8")
-        except Exception:
-            detail = str(e)
-        return None, f"http_{e.code}:{detail[:300]}"
+        resp = requests.post(
+            f"{url.rstrip('/')}/rest/v1/global_inventory",
+            json=rows,
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = json.loads(resp.text or "[]")
+        return {"inserted": len(data) if isinstance(data, list) else len(rows)}, None
+    except requests.exceptions.HTTPError as e:
+        detail = e.response.text[:300] if e.response else str(e)
+        code = e.response.status_code if e.response else 0
+        return None, f"http_{code}:{detail}"
     except Exception as e:
         return None, str(e)
 
@@ -575,9 +571,9 @@ def get_text_embedding(client, text: str) -> list:
 def _download_bytes(url: str, timeout: int = 15) -> bytes:
     if not url:
         return b""
-    req = urllib.request.Request(url, headers={"User-Agent": "MN-AI-Stylist/1.0"}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    resp = requests.get(url, headers={"User-Agent": "MN-AI-Stylist/1.0"}, timeout=timeout)
+    resp.raise_for_status()
+    return resp.content
 
 
 def classify_affiliate_image(image_url: str) -> dict:

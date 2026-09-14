@@ -5,8 +5,7 @@ Uses Replicate background removal + image processing.
 """
 import json
 import os
-import urllib.request
-import urllib.error
+import requests
 import base64
 import io
 from typing import Optional, Dict

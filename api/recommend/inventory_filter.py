@@ -5,7 +5,7 @@ Zero-latency SQL pre-filter before hitting Knowledge Graph or vector DB.
 from __future__ import annotations
 import json
 import os
-import urllib.request
+import requests
 from typing import Optional
 
 def _get_supabase_url():
@@ -37,13 +37,13 @@ def _sb_query(table: str, filters: dict, select: str = "*", limit: int = 200) ->
             params.append(f"{k}=eq.{v}")
 
     url = f"{supabase_url.rstrip('/')}/rest/v1/{table}?{'&'.join(params)}"
-    req = urllib.request.Request(url, headers={
+    headers = {
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
-    })
+    }
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read() or "[]")
+        resp = requests.get(url, headers=headers, timeout=10)
+        return resp.json() if resp.text else []
     except Exception:
         return []
 
@@ -68,7 +68,13 @@ def filter_brand_products(
     filters = {"is_active": True}
 
     if brand_id:
-        filters["catalog_id"] = brand_id
+        # Look up catalog_id from brand_id via brand_catalogs
+        catalogs = _sb_query("brand_catalogs", {"brand_id": brand_id}, select="id")
+        catalog_ids = [c["id"] for c in catalogs] if catalogs else []
+        if catalog_ids:
+            filters["catalog_id"] = catalog_ids[0] if len(catalog_ids) == 1 else catalog_ids
+        else:
+            return []
     if brand_name:
         filters["brand"] = brand_name
     if category:

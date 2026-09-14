@@ -7,8 +7,8 @@ _start_time = time.time()
 
 def handle_health() -> dict:
     """Platform health check."""
-    import urllib.request
     import json
+    import requests
 
     db_ok = False
     ai_ok = False
@@ -19,26 +19,30 @@ def handle_health() -> dict:
     supabase_key = os.environ.get("SUPABASE_KEY", "")
     if supabase_url and supabase_key:
         try:
-            req = urllib.request.Request(
-                f"{supabase_url.rstrip('/')}/rest/v1/brands?select=id&limit=1",
-                method="GET",
+            resp = requests.get(
+                f"{supabase_url.rstrip('/')}/rest/v1/brands",
+                params={"select": "id", "limit": "1"},
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                    "Range": "0-0",
+                },
+                timeout=10,
             )
-            req.add_header("apikey", supabase_key)
-            req.add_header("Authorization", f"Bearer {supabase_key}")
-            req.add_header("Range", "0-0")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                db_ok = resp.status in (200, 206)
+            db_ok = resp.status_code in (200, 206)
+            if not db_ok:
+                db_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
         except Exception as e:
-            db_error = str(e)[:200]
+            db_error = f"{type(e).__name__}: {str(e)[:200]}"
 
     # Check OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     if openai_key:
-        ai_ok = True  # Just check if key exists
+        ai_ok = True
 
     return {
         "status": "healthy" if db_ok else "degraded",
-        "version": "1.0.0",
+        "version": "1.2.0",
         "uptime_seconds": round(time.time() - _start_time),
         "db": "ok" if db_ok else "error",
         "db_error": db_error if not db_ok else "",

@@ -13,7 +13,7 @@ Endpoints:
 from http.server import BaseHTTPRequestHandler
 import json
 import os
-import urllib.request
+import requests
 import urllib.parse
 from datetime import datetime, timedelta
 
@@ -43,7 +43,7 @@ def compute_tier_progress(total_sold):
 # ─────────────────────────────────────────────────────────────
 def supabase_get(table, select, filters=None, order=None, limit=None):
     """
-    Query Supabase REST API using stdlib urllib.
+    Query Supabase REST API using the requests library.
     Returns (list_of_rows, error_string_or_None).
     """
     url_base = os.environ.get("SUPABASE_URL", "")
@@ -62,21 +62,23 @@ def supabase_get(table, select, filters=None, order=None, limit=None):
     query_string = urllib.parse.urlencode(params)
     url = f"{url_base.rstrip('/')}/rest/v1/{table}?{query_string}"
 
-    req = urllib.request.Request(url)
-    req.add_header("apikey", api_key)
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    req.add_header("Prefer", "return=representation")
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Prefer": "return=representation",
+    }
 
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            if isinstance(data, list):
-                return data, None
-            return [], f"unexpected_response: {str(data)[:100]}"
-    except urllib.error.HTTPError as e:
-        return [], f"HTTP {e.code}: {e.read().decode()[:100]}"
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return data, None
+        return [], f"unexpected_response: {str(data)[:100]}"
+    except requests.exceptions.HTTPError as e:
+        return [], f"HTTP {e.response.status_code}: {e.response.text[:100]}"
     except Exception as e:
         return [], str(e)
 

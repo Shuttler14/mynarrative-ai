@@ -1,7 +1,7 @@
 """Cross-Brand Syndicate API — manages brand pairings, affiliate revenue, and cart handoffs."""
 import json
 import os
-import urllib.request
+import requests
 import urllib.parse
 from datetime import datetime
 
@@ -14,21 +14,26 @@ PLATFORM_FEE_RATE = 0.03  # 3% platform fee
 
 
 def _sb_request(method, path, payload=None):
-    supabase_url = _get_supabase_url()
-    supabase_key = _get_supabase_key()
-    if not supabase_url or not supabase_key:
+    url = _get_supabase_url()
+    key = _get_supabase_key()
+    if not url or not key:
         return None
     headers = {
-        "apikey": supabase_key,
-        "Authorization": f"Bearer {supabase_key}",
-        "Content-Type": "application/json"
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
     }
-    body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(f"{supabase_url.rstrip('/')}{path}", data=body, headers=headers, method=method)
+    full_url = f"{url.rstrip('/')}{path}"
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = resp.read().decode() or "null"
-            return json.loads(raw)
+        if method == "GET":
+            resp = requests.get(full_url, headers=headers, timeout=20)
+        elif method == "POST":
+            resp = requests.post(full_url, json=payload, headers=headers, timeout=20)
+        elif method == "PATCH":
+            resp = requests.patch(full_url, json=payload, headers=headers, timeout=20)
+        else:
+            resp = requests.request(method, full_url, json=payload, headers=headers, timeout=20)
+        return resp.json() if resp.text else None
     except Exception as e:
         print(f"⚠️ [sb_request] {e}")
         return None

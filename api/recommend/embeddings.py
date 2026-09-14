@@ -277,7 +277,7 @@ def _set_cached(text: str, vec: list[float]):
 
 def _openai_embed(text: str) -> list[float]:
     """Generate text embedding via OpenAI API."""
-    import urllib.request
+    import requests as _requests
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         raise ValueError("OPENAI_API_KEY not set")
@@ -286,18 +286,16 @@ def _openai_embed(text: str) -> list[float]:
     if cached:
         return cached
 
-    payload = json.dumps({"model": "text-embedding-3-small", "input": text}).encode()
-    req = urllib.request.Request(
+    resp = _requests.post(
         "https://api.openai.com/v1/embeddings",
-        data=payload,
+        json={"model": "text-embedding-3-small", "input": text},
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        method="POST",
+        timeout=30,
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read())
+    data = resp.json()
     vec = data["data"][0]["embedding"]
     _set_cached(text, vec)
     return vec
@@ -307,7 +305,7 @@ def _openai_embed(text: str) -> list[float]:
 
 def _replicate_image_embed(image_url: str) -> Optional[list[float]]:
     """Generate image embedding via Replicate's Fashion-CLIP model."""
-    import urllib.request
+    import requests as _requests
     token = os.environ.get("REPLICATE_API_TOKEN", "")
     if not token:
         return None
@@ -317,38 +315,32 @@ def _replicate_image_embed(image_url: str) -> Optional[list[float]]:
         return cached
 
     try:
-        # Use Marqo's Fashion-CLIP model on Replicate
-        payload = json.dumps({
-            "version": "פורס1999fashion-clip",
-            "input": {"image": image_url},
-        }).encode()
-
-        # Create prediction
-        req = urllib.request.Request(
+        resp = _requests.post(
             "https://api.replicate.com/v1/predictions",
-            data=payload,
+            json={
+                "version": "פורס1999fashion-clip",
+                "input": {"image": image_url},
+            },
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             },
-            method="POST",
+            timeout=30,
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            pred = json.loads(resp.read())
+        pred = resp.json()
 
-        # Poll for completion (max 60s)
         pred_id = pred.get("id", "")
         if not pred_id:
             return None
 
         for _ in range(30):
             time.sleep(2)
-            poll_req = urllib.request.Request(
+            poll_resp = _requests.get(
                 f"https://api.replicate.com/v1/predictions/{pred_id}",
                 headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
             )
-            with urllib.request.urlopen(poll_req, timeout=10) as resp:
-                result = json.loads(resp.read())
+            result = poll_resp.json()
             if result.get("status") == "succeeded":
                 output = result.get("output", [])
                 if isinstance(output, list) and len(output) > 0:
@@ -370,35 +362,32 @@ def _replicate_image_embed(image_url: str) -> Optional[list[float]]:
 
 def _openai_image_embed_via_text(image_url: str) -> Optional[list[float]]:
     """Describe image via GPT-4o-mini, then embed the description (free fallback)."""
-    import urllib.request
+    import requests as _requests
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         return None
 
     try:
-        payload = json.dumps({
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "Describe this fashion item in detail: category, color, material, pattern, style, occasion, fit. Be concise. Output as structured attributes."},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Describe this fashion item:"},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ]},
-            ],
-            "max_tokens": 200,
-        }).encode()
-
-        req = urllib.request.Request(
+        resp = _requests.post(
             "https://api.openai.com/v1/chat/completions",
-            data=payload,
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": "Describe this fashion item in detail: category, color, material, pattern, style, occasion, fit. Be concise. Output as structured attributes."},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "Describe this fashion item:"},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ]},
+                ],
+                "max_tokens": 200,
+            },
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            method="POST",
+            timeout=30,
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
+        data = resp.json()
         description = data["choices"][0]["message"]["content"]
         return _openai_embed(description)
     except Exception:

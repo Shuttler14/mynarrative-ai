@@ -3,7 +3,7 @@ import hashlib
 import json
 import os
 import time
-import urllib.request
+import requests
 
 
 def _get_supabase_url():
@@ -19,16 +19,24 @@ def _sb_request(method, path, payload=None):
     key = _get_supabase_key()
     if not url or not key:
         return None
+    full_url = f"{url.rstrip('/')}{path}"
     headers = {
         "apikey": key,
         "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-    body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(f"{url.rstrip('/')}{path}", data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode() or "null")
+        if method == "GET":
+            resp = requests.get(full_url, headers=headers, timeout=15)
+        elif method == "POST":
+            resp = requests.post(full_url, json=payload, headers=headers, timeout=15)
+        elif method == "PATCH":
+            resp = requests.patch(full_url, json=payload, headers=headers, timeout=15)
+        elif method == "DELETE":
+            resp = requests.delete(full_url, headers=headers, timeout=15)
+        else:
+            resp = requests.request(method, full_url, json=payload, headers=headers, timeout=15)
+        return resp.json() if resp.text else None
     except Exception:
         return None
 
@@ -45,7 +53,6 @@ def validate_api_key(api_key: str) -> str:
     result = _sb_request("GET", f"/rest/v1/api_keys?key_hash=eq.{key_hash}&is_active=eq.true&select=brand_id")
     if result and len(result) > 0:
         brand_id = result[0].get("brand_id")
-        # Update last_used_at
         _sb_request("PATCH", f"/rest/v1/api_keys?key_hash=eq.{key_hash}", {"last_used_at": "now()"})
         return brand_id
     return None

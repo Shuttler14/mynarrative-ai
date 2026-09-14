@@ -27,9 +27,7 @@ import json
 import os
 import re
 from urllib.parse import urlparse
-import urllib.request
-import urllib.parse
-import urllib.error
+import requests
 from currency_utils import detect_currency_from_headers, convert_price, format_price, price_bounds_paise
 
 # =====================================================
@@ -170,15 +168,15 @@ def sb_get(table, select='*', filters=None, order=None, limit=None):
         params['limit'] = str(limit)
     
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(full_url, headers=headers)
     
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode())
-            return (data if isinstance(data, list) else []), None
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()[:100]
-        return [], f'HTTP {e.code}: {error_body}'
+        r = requests.get(full_url, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return (data if isinstance(data, list) else []), None
+    except requests.exceptions.HTTPError as e:
+        error_body = e.response.text[:100] if e.response else str(e)
+        return [], f'HTTP {e.response.status_code}: {error_body}'
     except Exception as e:
         return [], str(e)
 
@@ -207,16 +205,15 @@ def sb_patch(table, data, filter_col, filter_val, filter_col2=None, filter_val2=
         params[filter_col2] = f'eq.{filter_val2}'
     
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    body = json.dumps(data).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='PATCH')
     
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.loads(r.read().decode())
-            return resp, None
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()[:100]
-        return None, f'HTTP {e.code}: {error_body}'
+        r = requests.patch(full_url, json=data, headers=headers, timeout=10)
+        r.raise_for_status()
+        resp = r.json()
+        return resp, None
+    except requests.exceptions.HTTPError as e:
+        error_body = e.response.text[:100] if e.response else str(e)
+        return None, f'HTTP {e.response.status_code}: {error_body}'
     except Exception as e:
         return None, str(e)
 

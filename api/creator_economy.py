@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import requests as _requests
 import uuid
 import re
 from datetime import datetime, timedelta
@@ -839,21 +840,19 @@ class handler(BaseHTTPRequestHandler):
             ext = (mime.split('/')[-1] or 'png').lower().replace('jpeg', 'jpg')
             fname = f"creator-avatars/{user_id}-{int(datetime.utcnow().timestamp())}.{ext}"
             upload_url = f"{supa_url}/storage/v1/object/creator_assets/{fname}"
-            try:
-                import urllib.request, urllib.error
-                req = urllib.request.Request(
-                    upload_url,
-                    data=raw,
-                    method='POST',
-                    headers={
-                        'Authorization': f'Bearer {supa_key}',
-                        'apikey': supa_key,
-                        'Content-Type': mime,
-                        'x-upsert': 'true',
-                    }
-                )
-                urllib.request.urlopen(req, timeout=10).read()
-                public_url = f"{supa_url}/storage/v1/object/public/creator_assets/{fname}"
+                try:
+                    _requests.post(
+                        upload_url,
+                        data=raw,
+                        headers={
+                            'Authorization': f'Bearer {supa_key}',
+                            'apikey': supa_key,
+                            'Content-Type': mime,
+                            'x-upsert': 'true',
+                        },
+                        timeout=10,
+                    )
+                    public_url = f"{supa_url}/storage/v1/object/public/creator_assets/{fname}"
 
                 # Also persist on creators row
                 try:

@@ -5,7 +5,7 @@ Creates dynamic stylist explanations for why items were chosen.
 from __future__ import annotations
 import json
 import os
-import urllib.request
+import requests
 from typing import Optional
 
 from .knowledge_graph import get_knowledge_graph
@@ -203,24 +203,20 @@ Items:
 Output only the explanation, no labels or preamble:"""
 
     try:
-        payload = json.dumps({
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 150,
-            "temperature": 0.7,
-        }).encode()
-
-        req = urllib.request.Request(
+        resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
-            data=payload,
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 150,
+                "temperature": 0.7,
+            },
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
             },
-            method="POST",
+            timeout=15,
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
+        data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
     except Exception:
         return generate_rule_based_reasoning(outfit_items, occasion, style, budget, body_shape)

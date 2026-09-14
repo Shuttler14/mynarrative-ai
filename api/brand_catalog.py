@@ -9,7 +9,7 @@ import io
 import os
 import sys
 import uuid
-import urllib.request
+import requests
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -131,20 +131,18 @@ def _sb_request(method: str, path: str, payload: Any = None):
     if not url or not key:
         return None, "supabase_not_configured"
     full_url = f"{url.rstrip('/')}{path}"
-    body = None
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(full_url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read().decode("utf-8") or "null"
-            return json.loads(raw), None
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8")
-        except Exception:
-            detail = str(e)
-        return None, f"http_{e.code}:{detail[:300]}"
+        kwargs = {"headers": headers, "timeout": 30}
+        if payload is not None:
+            kwargs["json"] = payload
+        resp = requests.request(method, full_url, **kwargs)
+        resp.raise_for_status()
+        raw = resp.text or "null"
+        return json.loads(raw), None
+    except requests.exceptions.HTTPError as e:
+        detail = e.response.text[:300] if e.response else str(e)
+        code = e.response.status_code if e.response else 0
+        return None, f"http_{code}:{detail}"
     except Exception as e:
         return None, str(e)
 

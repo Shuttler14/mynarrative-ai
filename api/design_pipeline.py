@@ -14,9 +14,7 @@ import os
 import uuid
 import time
 import requests
-import urllib.request
 import urllib.parse
-import urllib.error
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
@@ -48,13 +46,13 @@ def sb_get(table, select='*', filters=None, limit=None):
     if limit:
         params['limit'] = str(limit)
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(full_url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode())
-            return (data if isinstance(data, list) else []), None
-    except urllib.error.HTTPError as e:
-        return [], f'HTTP {e.code}: {e.read().decode()[:100]}'
+        r = requests.get(full_url, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return (data if isinstance(data, list) else []), None
+    except requests.exceptions.HTTPError as e:
+        return [], f'HTTP {e.response.status_code}: {e.response.text[:100]}'
     except Exception as e:
         return [], str(e)
 
@@ -64,13 +62,12 @@ def sb_patch(table, data, filter_col, filter_val):
         return None, 'not_configured'
     params = {filter_col: f'eq.{filter_val}'}
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    body = json.dumps(data).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='PATCH')
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode()), None
-    except urllib.error.HTTPError as e:
-        return None, f'HTTP {e.code}: {e.read().decode()[:100]}'
+        r = requests.patch(full_url, json=data, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json(), None
+    except requests.exceptions.HTTPError as e:
+        return None, f'HTTP {e.response.status_code}: {e.response.text[:100]}'
     except Exception as e:
         return None, str(e)
 
@@ -80,16 +77,15 @@ def sb_rpc(function_name, params):
     if not url or not key:
         return None, 'not_configured'
     full_url = f"{url.rstrip('/')}/rest/v1/rpc/{function_name}"
-    body = json.dumps(params).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='POST')
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode()), None
-    except urllib.error.HTTPError as e:
-        body_err = e.read().decode()
+        r = requests.post(full_url, json=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json(), None
+    except requests.exceptions.HTTPError as e:
+        body_err = e.response.text[:150] if e.response else str(e)
         try: body_err = json.loads(body_err)
         except: pass
-        return None, f'HTTP {e.code}: {str(body_err)[:150]}'
+        return None, f'HTTP {e.response.status_code}: {str(body_err)[:150]}'
     except Exception as e:
         return None, str(e)
 

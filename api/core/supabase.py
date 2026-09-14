@@ -1,7 +1,7 @@
 """Shared Supabase request helper for B2B platform modules."""
 import json
 import os
-import urllib.request
+import requests
 
 
 def _get_supabase_url():
@@ -23,14 +23,18 @@ def sb_request(method: str, path: str, payload=None):
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-    body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        f"{url.rstrip('/')}{path}",
-        data=body, headers=headers, method=method,
-    )
+    full_url = f"{url.rstrip('/')}{path}"
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode() or "null"
-            return json.loads(raw)
+        if method == "GET":
+            resp = requests.get(full_url, headers=headers, timeout=15)
+        elif method == "POST":
+            resp = requests.post(full_url, json=payload, headers=headers, timeout=15)
+        elif method == "PATCH":
+            resp = requests.patch(full_url, json=payload, headers=headers, timeout=15)
+        elif method == "DELETE":
+            resp = requests.delete(full_url, headers=headers, timeout=15)
+        else:
+            resp = requests.request(method, full_url, json=payload, headers=headers, timeout=15)
+        return resp.json() if resp.text else None
     except Exception:
         return None

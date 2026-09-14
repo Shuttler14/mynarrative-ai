@@ -6,9 +6,8 @@ import hashlib
 import base64
 from datetime import datetime
 from urllib.parse import urlparse
-import urllib.request
+import requests
 import urllib.parse
-import urllib.error
 from currency_utils import detect_currency_from_headers, convert_price, format_price
 
 # ============================================================
@@ -66,13 +65,13 @@ def sb_get(table, select='*', filters=None, order=None, limit=None):
     if limit:
         params['limit'] = str(limit)
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(full_url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode())
-            return (data if isinstance(data, list) else []), None
-    except urllib.error.HTTPError as e:
-        return [], f'HTTP {e.code}: {e.read().decode()[:100]}'
+        r = requests.get(full_url, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return (data if isinstance(data, list) else []), None
+    except requests.exceptions.HTTPError as e:
+        return [], f'HTTP {e.response.status_code}: {e.response.text[:100]}'
     except Exception as e:
         return [], str(e)
 
@@ -83,14 +82,13 @@ def sb_post(table, data):
     if not url or not key:
         return None, 'not_configured'
     full_url = f"{url.rstrip('/')}/rest/v1/{table}"
-    body = json.dumps(data).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='POST')
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.loads(r.read().decode())
-            return (resp[0] if isinstance(resp, list) and resp else resp), None
-    except urllib.error.HTTPError as e:
-        return None, f'HTTP {e.code}: {e.read().decode()[:100]}'
+        r = requests.post(full_url, json=data, headers=headers, timeout=10)
+        r.raise_for_status()
+        resp = r.json()
+        return (resp[0] if isinstance(resp, list) and resp else resp), None
+    except requests.exceptions.HTTPError as e:
+        return None, f'HTTP {e.response.status_code}: {e.response.text[:100]}'
     except Exception as e:
         return None, str(e)
 
@@ -102,14 +100,13 @@ def sb_patch(table, data, filter_col, filter_val):
         return None, 'not_configured'
     params = {filter_col: f'eq.{filter_val}'}
     full_url = f"{url.rstrip('/')}/rest/v1/{table}?{urllib.parse.urlencode(params)}"
-    body = json.dumps(data).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='PATCH')
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.loads(r.read().decode())
-            return resp, None
-    except urllib.error.HTTPError as e:
-        return None, f'HTTP {e.code}: {e.read().decode()[:100]}'
+        r = requests.patch(full_url, json=data, headers=headers, timeout=10)
+        r.raise_for_status()
+        resp = r.json()
+        return resp, None
+    except requests.exceptions.HTTPError as e:
+        return None, f'HTTP {e.response.status_code}: {e.response.text[:100]}'
     except Exception as e:
         return None, str(e)
 
@@ -176,16 +173,15 @@ def sb_rpc(function_name, params):
     if not url or not key:
         return None, 'not_configured'
     full_url = f"{url.rstrip('/')}/rest/v1/rpc/{function_name}"
-    body = json.dumps(params).encode()
-    req = urllib.request.Request(full_url, data=body, headers=headers, method='POST')
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode()), None
-    except urllib.error.HTTPError as e:
-        body_err = e.read().decode()
+        r = requests.post(full_url, json=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json(), None
+    except requests.exceptions.HTTPError as e:
+        body_err = e.response.text[:150] if e.response else str(e)
         try: body_err = json.loads(body_err)
         except: pass
-        return None, f'HTTP {e.code}: {str(body_err)[:150]}'
+        return None, f'HTTP {e.response.status_code}: {str(body_err)[:150]}'
     except Exception as e:
         return None, str(e)
 
@@ -518,19 +514,15 @@ def update_shopify_order_with_print_file(order_id, high_res_url):
     try:
         # Read current note, append print file once.
         get_url = f"{base_url}/admin/api/{api_version}/orders/{order_id}.json?fields=id,note"
-        get_req = urllib.request.Request(get_url, headers=headers, method="GET")
-        existing_note = ""
-        with urllib.request.urlopen(get_req, timeout=20) as r:
-            payload = json.loads(r.read().decode())
-            existing_note = (payload.get("order", {}) or {}).get("note") or ""
+        r = requests.get(get_url, headers=headers, timeout=20)
+        r.raise_for_status()
+        payload = r.json()
+        existing_note = (payload.get("order", {}) or {}).get("note") or ""
 
         if print_line not in existing_note:
             new_note = f"{existing_note}\n{print_line}".strip() if existing_note else print_line
             put_url = f"{base_url}/admin/api/{api_version}/orders/{order_id}.json"
-            put_body = json.dumps({"order": {"id": int(order_id), "note": new_note}}).encode()
-            put_req = urllib.request.Request(put_url, data=put_body, headers=headers, method="PUT")
-            with urllib.request.urlopen(put_req, timeout=20):
-                pass
+            requests.put(put_url, json={"order": {"id": int(order_id), "note": new_note}}, headers=headers, timeout=20)
             print(f"[SHOPIFY PRINT URL] Note updated for order={order_id}")
         else:
             print(f"[SHOPIFY PRINT URL] Note already contains print URL for order={order_id}")
@@ -550,14 +542,7 @@ def update_shopify_order_with_print_file(order_id, high_res_url):
                 "value": high_res_url,
             }
         }
-        mf_req = urllib.request.Request(
-            mf_url,
-            data=json.dumps(mf_payload).encode(),
-            headers=headers,
-            method="POST"
-        )
-        with urllib.request.urlopen(mf_req, timeout=20):
-            pass
+        requests.post(mf_url, json=mf_payload, headers=headers, timeout=20)
         print(f"[SHOPIFY PRINT URL] Metafield written for order={order_id}")
         ok = True
     except Exception as e:

@@ -1,7 +1,7 @@
 """Payment provider abstraction layer — Stripe + Razorpay."""
 import json
 import os
-import urllib.request
+import requests
 
 
 class PaymentProvider:
@@ -43,14 +43,17 @@ class StripeProvider(PaymentProvider):
             "Authorization": f"Bearer {self.secret_key}",
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        body = urllib.parse.urlencode(data).encode() if data else None
-        req = urllib.request.Request(
-            f"https://api.stripe.com/v1{path}",
-            data=body, headers=headers, method=method
-        )
+        url = f"https://api.stripe.com/v1{path}"
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode())
+            if method == "GET":
+                resp = requests.get(url, headers=headers, timeout=30)
+            elif method == "POST":
+                resp = requests.post(url, data=data, headers=headers, timeout=30)
+            elif method == "DELETE":
+                resp = requests.delete(url, headers=headers, timeout=30)
+            else:
+                resp = requests.request(method, url, data=data, headers=headers, timeout=30)
+            return resp.json() if resp.text else None
         except Exception as e:
             print(f"⚠️ [Stripe] {e}")
             return None
@@ -183,14 +186,17 @@ class RazorpayProvider(PaymentProvider):
             "Authorization": f"Basic {auth}",
             "Content-Type": "application/json"
         }
-        body = json.dumps(data).encode() if data else None
-        req = urllib.request.Request(
-            f"https://api.razorpay.com/v1{path}",
-            data=body, headers=headers, method=method
-        )
+        url = f"https://api.razorpay.com/v1{path}"
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode())
+            if method == "GET":
+                resp = requests.get(url, headers=headers, timeout=30)
+            elif method == "POST":
+                resp = requests.post(url, json=data, headers=headers, timeout=30)
+            elif method == "DELETE":
+                resp = requests.delete(url, headers=headers, timeout=30)
+            else:
+                resp = requests.request(method, url, json=data, headers=headers, timeout=30)
+            return resp.json() if resp.text else None
         except Exception as e:
             print(f"⚠️ [Razorpay] {e}")
             return None
@@ -272,20 +278,26 @@ def _get_supabase_key():
 
 
 def _sb_request(method, path, payload=None):
-    supabase_url = _get_supabase_url()
-    supabase_key = _get_supabase_key()
-    if not supabase_url or not supabase_key:
+    url = _get_supabase_url()
+    key = _get_supabase_key()
+    if not url or not key:
         return None
     headers = {
-        "apikey": supabase_key,
-        "Authorization": f"Bearer {supabase_key}",
-        "Content-Type": "application/json"
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
     }
-    body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(f"{supabase_url.rstrip('/')}{path}", data=body, headers=headers, method=method)
+    full_url = f"{url.rstrip('/')}{path}"
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode() or "null")
+        if method == "GET":
+            resp = requests.get(full_url, headers=headers, timeout=15)
+        elif method == "POST":
+            resp = requests.post(full_url, json=payload, headers=headers, timeout=15)
+        elif method == "PATCH":
+            resp = requests.patch(full_url, json=payload, headers=headers, timeout=15)
+        else:
+            resp = requests.request(method, full_url, json=payload, headers=headers, timeout=15)
+        return resp.json() if resp.text else None
     except Exception:
         return None
 
