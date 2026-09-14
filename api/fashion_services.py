@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from currency_utils import detect_currency_from_headers, convert_price_rupees, format_price
+from garment_pipeline import classify_garment
 
 try:
     from openai import OpenAI
@@ -863,10 +864,16 @@ Rules:
     }
 
 
-def run_idm_vton(user_image: str, garment_image: str, description: str) -> str:
+def run_idm_vton(user_image: str, garment_image: str, description: str, category: str = "upper_body") -> str:
     token = os.environ.get("REPLICATE_API_TOKEN")
     if not token or not REPLICATE_AVAILABLE or not user_image or not garment_image:
         return ""
+    valid_categories = ("upper_body", "lower_body", "dresses")
+    if category not in valid_categories:
+        category = "upper_body"
+    force_dc = category == "dresses"
+    import random
+    seed = random.randint(0, 999999)
     try:
         client = replicate.Client(api_token=token)
         try:
@@ -876,7 +883,17 @@ def run_idm_vton(user_image: str, garment_image: str, description: str) -> str:
             version_id = "c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4"
         output = client.run(
             f"cuuupid/idm-vton:{version_id}",
-            input={"human_img": user_image, "garm_img": garment_image, "garment_des": description or "streetwear top", "category": "upper_body", "crop": False, "seed": 42, "steps": 30, "force_dc": False, "mask_only": False}
+            input={
+                "human_img": user_image,
+                "garm_img": garment_image,
+                "garment_des": description or "clothing item",
+                "category": category,
+                "crop": False,
+                "seed": seed,
+                "steps": 30,
+                "force_dc": force_dc,
+                "mask_only": False,
+            }
         )
         return str(output) if output else ""
     except Exception as e:
@@ -1032,7 +1049,7 @@ def _run_path_a_global(client, biometrics: dict, occasion: str, vibe_id: str, us
                 "similarity": m.get("similarity", 0.0),
             })
         selected_match = matches[0]
-        final_image_url = run_idm_vton(user_image=user_image, garment_image=selected_match.get("flat_lay_url") or selected_match.get("image_url") or "", description=selected_match.get("title", "global product"))
+        final_image_url = run_idm_vton(user_image=user_image, garment_image=selected_match.get("flat_lay_url") or selected_match.get("image_url") or "", description=selected_match.get("title", "global product"), category=classify_garment(selected_match.get("title", ""), selected_match.get("category", "")))
         vton_applied = bool(final_image_url)
 
     if not final_image_url:
@@ -1219,7 +1236,7 @@ def _handle_stylist_pipeline(body):
             outfit_pieces = recommendation.get("outfit_pieces", [])
             selected_products = recommendation.get("selected_products", [])
             vton_product = selected_products[0] if selected_products else _fallback_my_narrative_selection(occasion, vibe_id)[0]
-            vton_img = run_idm_vton(user_image=user_image, garment_image=vton_product.get("flat_lay_url", ""), description=vton_product.get("title", "streetwear top"))
+            vton_img = run_idm_vton(user_image=user_image, garment_image=vton_product.get("flat_lay_url", ""), description=vton_product.get("title", "clothing item"), category=classify_garment(vton_product.get("title", ""), vton_product.get("category", "")))
             vton_applied = bool(vton_img)
             final_image_url = vton_img or vton_product.get("flat_lay_url") or "https://placehold.co/768x1024/0b0b0f/39A596?text=MY+NARRATIVE+LOOK"
             for p in selected_products[:3]:
