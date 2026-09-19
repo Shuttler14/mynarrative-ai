@@ -1,11 +1,12 @@
 from http.server import BaseHTTPRequestHandler
 import json
+import os
 import requests
 import time
 
 # --- CREDENTIALS ---
 SHOP_DOMAIN = "jjdk0v-0c.myshopify.com"
-ACCESS_TOKEN = "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"
+ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN", "")
 # -------------------
 
 class handler(BaseHTTPRequestHandler):
