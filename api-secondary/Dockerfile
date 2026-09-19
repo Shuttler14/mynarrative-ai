@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir flask flask-cors replicate gunicorn requests
+RUN pip install --no-cache-dir flask flask-cors replicate gunicorn requests httpx
 
 COPY app.py .
 COPY virtual_try_on.py .

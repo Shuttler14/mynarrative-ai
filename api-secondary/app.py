@@ -16,6 +16,11 @@ import requests as sync_requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+import re
+import html as html_mod
+import urllib.parse
+import urllib.request
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -34,7 +39,7 @@ def _get_rembg_version():
 
 
 def _get_vton_version():
-    return os.environ.get("REPLICATE_VTON_VERSION", "0e122964dd5d7fce695da14e9206f8dd48c0c5595ecb7e3cf1a4078701fb2665")
+    return os.environ.get("REPLICATE_VTON_VERSION", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -92,6 +97,201 @@ def _make_images_accessible(recommendations):
                 logger.warning(f"Failed to proxy image: {e}")
         out.append(rec)
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Marketplace scrapers — ported from Drishti Jul 26 working backend
+# (api/services/price_scraper.py + api/services/marketplace_reco.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SCRAPER_CACHE = {}
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+]
+_OCCASION_CATEGORIES = {
+    "casual": ["tshirt", "casual shirt", "jeans"],
+    "work": ["formal shirt", "formal trousers"],
+    "office": ["formal shirt", "blazer"],
+    "wedding": ["kurta", "nehru jacket"],
+    "party": ["party shirt", "blazer"],
+    "date": ["shirt", "jeans"],
+    "gym": ["gym tshirt", "track pants"],
+    "festive": ["kurta", "ethnic wear"],
+    "travel": ["tshirt", "travel jeans"],
+    "college": ["tshirt", "jeans casual"],
+}
+_STYLE_KEYWORDS = {
+    "minimalist": ["plain solid"], "streetwear": ["oversized"],
+    "classic": ["classic", "polo"], "boho": ["bohemian", "floral"],
+    "athleisure": ["athleisure"], "corporate": ["formal"],
+    "glam": ["designer"], "y2k": ["retro"], "cottagecore": ["floral"],
+}
+_GENDER_Q = {"male": "men", "female": "women"}
+
+
+def _build_search_queries(occasion="", style="", gender=""):
+    occ = (occasion or "casual").lower()
+    cats = _OCCASION_CATEGORIES.get(occ, ["tshirt", "casual shirt"])
+    gs = _GENDER_Q.get((gender or "").lower(), "")
+    queries = []
+    for cat in cats[:3]:
+        parts = [cat, gs]
+        if style and style.lower() not in cat.lower():
+            kw = _STYLE_KEYWORDS.get(style.lower(), [])
+            if kw and kw[0] not in cat.lower():
+                parts.insert(0, kw[0])
+        queries.append(" ".join(parts))
+    return queries
+
+
+def _fetch_html(url, timeout=15):
+    headers = {"User-Agent": random.choice(_USER_AGENTS),
+               "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+               "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8"}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _scrape_amazon(query, max_results=8):
+    search_url = f"https://www.amazon.in/s?k={query.replace(' ', '+')}&ref=nb_sb_noss"
+    try:
+        html = _fetch_html(search_url)
+    except Exception as e:
+        print(f"[Amazon] fetch failed: {e}", flush=True)
+        return []
+    products = []
+    matches = list(re.finditer(r'data-component-type="s-search-result"', html))
+    for i, m in enumerate(matches[:max_results]):
+        chunk = html[m.start():matches[i+1].start() if i+1 < len(matches) else m.start()+8000]
+        asin_m = re.search(r'data-asin="([A-Z0-9]{10})"', chunk)
+        if not asin_m:
+            continue
+        asin = asin_m.group(1)
+        h2s = re.findall(r'<h2[^>]*>(.*?)</h2>', chunk, re.DOTALL)
+        title = html_mod.unescape(re.sub(r'<[^>]+>', '', h2s[-1]).strip()) if h2s else ""
+        if not title:
+            tm = re.search(r'class="a-text-normal"[^>]*>([^<]+)<', chunk)
+            title = html_mod.unescape(tm.group(1).strip()) if tm else ""
+        pm = re.search(r'class="a-price-whole"[^>]*>([0-9,]+)<', chunk)
+        price = int(pm.group(1).replace(",", "")) if pm else 0
+        im = re.search(r'<img[^>]*src="(https://m\.media-amazon\.com/[^"]+)"', chunk)
+        image_url = im.group(1) if im else ""
+        if title and price > 0:
+            products.append({"source": "amazon", "product_id": asin, "title": title,
+                             "price": price, "image_url": image_url,
+                             "url": f"https://www.amazon.in/dp/{asin}"})
+    print(f"[Amazon] {len(products)} products for '{query[:40]}'", flush=True)
+    return products
+
+
+def _scrape_flipkart(query, max_results=8):
+    search_url = f"https://www.flipkart.com/search?q={query.replace(' ', '+')}"
+    try:
+        html = _fetch_html(search_url)
+    except Exception as e:
+        print(f"[Flipkart] fetch failed: {e}", flush=True)
+        return []
+    products = []
+    try:
+        m = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.+)', html, re.DOTALL)
+        if m:
+            raw = m.group(1)
+            for marker in [';\n', ';\r', ';</script>', ';\nwindow.']:
+                idx = raw.find(marker)
+                if 0 < idx < len(raw):
+                    raw = raw[:idx]
+                    break
+            state = json.loads(raw)
+            page_data = state.get("pageDataV4", {}).get("page", {}).get("data", {})
+            for key, val in page_data.items():
+                if not isinstance(val, list):
+                    continue
+                for item in val:
+                    if not isinstance(item, dict):
+                        continue
+                    pi = item.get("productInfo", {}).get("value", {})
+                    if not pi:
+                        continue
+                    titles = pi.get("titles", {})
+                    pricing = pi.get("pricing", {})
+                    prices_list = pricing.get("prices", [])
+                    base_url = pi.get("baseUrl", "")
+                    pid = pi.get("id", "")
+                    title = titles.get("title") or titles.get("newTitle", "")
+                    brand = titles.get("superTitle", "")
+                    selling_price = 0
+                    for p in prices_list:
+                        if p.get("priceType") == "SPECIAL_PRICE":
+                            selling_price = int(p.get("value", 0))
+                    if not selling_price and prices_list:
+                        selling_price = int(prices_list[-1].get("value", 0))
+                    images = pi.get("media", {}).get("images", [])
+                    image_url = ""
+                    if images:
+                        raw_img = images[0].get("url", "")
+                        image_url = raw_img.replace("{@width}", "300").replace("{@height}", "300").replace("{@quality}", "70")
+                    link = f"https://www.flipkart.com{base_url.split('?')[0]}" if base_url else ""
+                    if title and selling_price > 0:
+                        products.append({"source": "flipkart", "product_id": pid,
+                                         "title": f"{brand} {title}".strip() if brand else title,
+                                         "price": selling_price, "image_url": image_url,
+                                         "url": link or search_url})
+    except Exception as e:
+        print(f"[Flipkart] JSON parse: {e}", flush=True)
+    if not products:
+        data_ids = list(re.finditer(r'data-id="([^"]+)"', html))
+        for i, dm in enumerate(data_ids[:max_results]):
+            chunk = html[dm.start():data_ids[i+1].start() if i+1 < len(data_ids) else dm.start()+8000]
+            pid = dm.group(1)
+            lm = re.search(r'href="(/[^"]+?/p/itm[A-Za-z0-9]+[^"]*)"', chunk)
+            link = f"https://www.flipkart.com{lm.group(1).split('?')[0]}" if lm else ""
+            title = ""
+            tm = re.search(r'href="[^"]*"[^>]*title="([^"]+)"', chunk)
+            if tm:
+                title = html_mod.unescape(tm.group(1).strip())
+            if not title:
+                for t_m in re.finditer(r'>([A-Z][^<]{15,80})</(?:a|span|div)', chunk):
+                    t = t_m.group(1).strip()
+                    if len(t) > 15 and not t.startswith('\u20b9'):
+                        title = html_mod.unescape(t)
+                        break
+            prices = re.findall(r'\u20b9([\d,]+)', chunk)
+            price = int(prices[0].replace(",", "")) if prices else 0
+            if title and price > 0:
+                products.append({"source": "flipkart", "product_id": pid, "title": title,
+                                 "price": price, "image_url": "", "url": link or search_url})
+    print(f"[Flipkart] {len(products)} products for '{query[:40]}'", flush=True)
+    return products[:max_results]
+
+
+def _search_marketplace_products(occasion, style, gender, count=12):
+    queries = _build_search_queries(occasion, style, gender)
+    logger.info(f"[Marketplace] queries: {queries}")
+    all_products = []
+    seen_ids = set()
+    for query in queries[:2]:
+        try:
+            for p in _scrape_amazon(query, 5):
+                pid = f"{p['source']}:{p['product_id']}"
+                if pid not in seen_ids:
+                    seen_ids.add(pid)
+                    all_products.append(p)
+        except Exception as e:
+            logger.error(f"[Marketplace] Amazon error for '{query}': {e}")
+        try:
+            for p in _scrape_flipkart(query, 5):
+                pid = f"{p['source']}:{p['product_id']}"
+                if pid not in seen_ids:
+                    seen_ids.add(pid)
+                    all_products.append(p)
+        except Exception as e:
+            logger.error(f"[Marketplace] Flipkart error for '{query}': {e}")
+    all_products.sort(key=lambda x: x.get("price", 99999))
+    logger.info(f"[Marketplace] Total: {len(all_products)} products")
+    return all_products[:count]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -216,32 +416,28 @@ def _preprocess_garment_for_vton(garment_url, should_extract=True):
     
     From Jul 26: marketplace photos (Amazon, Myntra, Flipkart) have backgrounds
     that confuse VTON. Extract clean flat-lay first.
+    
+    IMPORTANT: We extract from ALL images (including data URIs from reco endpoint)
+    because reco returns raw marketplace photos as data URIs, and VTON needs
+    clean flat-lay garments without model backgrounds.
     """
-    if not should_extract:
-        return garment_url
-    if not garment_url or garment_url.startswith("data:"):
+    if not should_extract or not garment_url:
         return garment_url
 
-    marketplace_domains = ["myntra.com", "myntassets.com", "ajio.com", "jioimages.com",
-                           "amazon.in", "amazon.com", "flipkart.com", "meesho.com",
-                           "gstatic.com", "google.com"]
-    is_marketplace = any(d in garment_url for d in marketplace_domains)
-
-    if is_marketplace:
-        logger.info(f"Extracting garment from marketplace URL: {garment_url[:80]}")
-        no_bg_url = _replicate_remove_bg(garment_url)
-        if no_bg_url:
-            try:
-                no_bg_bytes = sync_requests.get(no_bg_url, headers={
-                    "User-Agent": "Mozilla/5.0"
-                }, timeout=15).content
-                garment_bytes = _post_process_garment(no_bg_bytes)
-                b64 = base64.b64encode(garment_bytes).decode()
-                logger.info(f"Garment extracted successfully ({len(garment_bytes)} bytes)")
-                return f"data:image/png;base64,{b64}"
-            except Exception as e:
-                logger.warning(f"Garment post-processing failed: {e}")
-        logger.warning("Garment extraction failed, using original")
+    logger.info(f"[vton] Extracting garment from: {garment_url[:80]}")
+    no_bg_url = _replicate_remove_bg(garment_url)
+    if no_bg_url:
+        try:
+            no_bg_bytes = sync_requests.get(no_bg_url, headers={
+                "User-Agent": "Mozilla/5.0"
+            }, timeout=15).content
+            garment_bytes = _post_process_garment(no_bg_bytes)
+            b64 = base64.b64encode(garment_bytes).decode()
+            logger.info(f"[vton] Garment extracted successfully ({len(garment_bytes)} bytes)")
+            return f"data:image/png;base64,{b64}"
+        except Exception as e:
+            logger.warning(f"[vton] Garment post-processing failed: {e}")
+    logger.warning("[vton] Garment extraction failed, using original")
 
     return garment_url
 
@@ -592,6 +788,11 @@ def body_analysis():
                         val = (body_data.get(key) or "").lower().strip()
                         if val not in valid_vals:
                             body_data[key] = valid_vals[1]  # default to second option
+                    # Normalize keys for frontend wizard v4
+                    if "fitness_level" in body_data and "fitness" not in body_data:
+                        body_data["fitness"] = body_data["fitness_level"]
+                    if "body_shape" in body_data and "body_type" not in body_data:
+                        body_data["body_type"] = body_data["body_shape"]
                     return jsonify({"success": True, "body_data": body_data, "confidence": 0.88, "source": "gpt-4o-mini"})
             except Exception as e:
                 logger.warning(f"OpenAI body analysis failed: {e}")
@@ -599,7 +800,9 @@ def body_analysis():
         return jsonify({
             "success": True,
             "body_data": {"body_type": "average", "skin_tone": "medium", "height": "average", "build": "regular",
-                          "face_shape": "oval", "fitness_level": "average", "complexion": "clear", "undertone": "neutral"},
+                          "face_shape": "oval", "fitness_level": "average", "fitness": "average",
+                          "complexion": "clear", "undertone": "neutral",
+                          "hair_color": "black", "hair_style": "straight"},
             "confidence": 0.6, "source": "defaults",
         })
     except Exception as e:
@@ -607,7 +810,7 @@ def body_analysis():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Recommendations (reco/outfits) — proxied to Vercel with image proxying
+# Recommendations (reco/outfits) — diverse garment search pipeline
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/reco/outfits", methods=["POST", "OPTIONS"])
@@ -615,7 +818,32 @@ def reco_outfits():
     if request.method == "OPTIONS":
         return "", 204, cors_headers()
     body = request.get_json(force=True) or {}
+    occasion = body.get("occasion", "casual")
+    style = body.get("style", "minimalist")
+    gender = body.get("gender", "men")
+    brands = body.get("brands", [])
+
     try:
+        # Primary: marketplace search (Amazon + Flipkart) — Jul 26 working pipeline
+        products = _search_marketplace_products(occasion, style, gender, count=6)
+        logger.info(f"[reco] marketplace returned {len(products)} products")
+        if products:
+            recs = []
+            for p in products:
+                recs.append({
+                    "product_id": p.get("product_id", ""),
+                    "title": p.get("title", "Recommended"),
+                    "price": p.get("price", 0),
+                    "url": p.get("url", "#"),
+                    "image_url": p.get("image_url", ""),
+                    "flat_lay_url": p.get("image_url", ""),
+                    "score": 0.85,
+                    "source": p.get("source", "marketplace"),
+                })
+            recs = _make_images_accessible(recs)
+            return jsonify({"success": True, "recommendations": recs, "outfits": recs, "source": "marketplace_search"})
+
+        # Fallback: Vercel fashion consultant (My Narrative catalog)
         resp = sync_requests.post(
             f"{VERCEL_API}/api/fashion/consultant",
             headers={
@@ -624,11 +852,11 @@ def reco_outfits():
             },
             json={
                 "user_id": body.get("user_id", "widget_user"),
-                "occasion": body.get("occasion", "casual"),
-                "vibe_id": body.get("style", "minimalist"),
+                "occasion": occasion,
+                "vibe_id": style,
                 "currency": body.get("currency", "INR"),
-                "brands": body.get("brands", []),
-                "gender": body.get("gender", "men"),
+                "brands": brands,
+                "gender": gender,
                 "body_data": body.get("body_data", {}),
                 "person_image_url": body.get("person_image_url", ""),
             },
@@ -649,10 +877,10 @@ def reco_outfits():
                 "score": 0.85,
                 "source": "mynarrative",
             })
-        # PROVEN PATTERN: Proxy inaccessible images as data URIs
         recs = _make_images_accessible(recs)
         return jsonify({"success": True, "recommendations": recs, "outfits": recs, "data": data})
     except Exception as e:
+        logger.error(f"[reco/outfits] Error: {e}")
         return jsonify({"success": True, "recommendations": [], "outfits": [], "error": str(e)})
 
 

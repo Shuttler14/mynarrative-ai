@@ -28,11 +28,13 @@ import json
 import os
 import time
 import math
+import re
 import threading
 import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List
+from html.parser import HTMLParser
 
 try:
     from openai import OpenAI
@@ -721,6 +723,223 @@ def search_global_inventory(client: "OpenAI", style_query: str, category: str = 
 
 
 # ============================================================================
+#  GOOGLE SHOPPING SEARCH — Real-time garment search for VTON
+#  Searches Google Shopping with keywords, returns product images + prices
+# ============================================================================
+
+class _GoogleShoppingParser(HTMLParser):
+    """Parse Google Shopping HTML to extract product data."""
+    def __init__(self):
+        super().__init__()
+        self.products = []
+        self._current = {}
+        self._in_title = False
+        self._in_price = False
+        self._capture_text = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        cls = attrs_dict.get("class", "")
+        href = attrs_dict.get("href", "")
+        # Product links contain /shopping/product/ or redirect through google
+        if tag == "a" and ("shopping" in href or "product" in href):
+            if not self._current.get("url"):
+                self._current["url"] = href
+        # Product images
+        if tag == "img" and ("product" in cls or "image" in cls or attrs_dict.get("data-src", "")):
+            src = attrs_dict.get("src", "") or attrs_dict.get("data-src", "")
+            if src and "gstatic" not in src and not self._current.get("image"):
+                self._current["image"] = src
+
+    def handle_data(self, data):
+        text = data.strip()
+        if not text:
+            return
+        # Price detection: ₹1,299 or Rs. 1,299 or $29.99
+        price_match = re.search(r'(?:₹|Rs\.?|INR|USD|\$)\s*[\d,]+(?:\.\d{2})?', text)
+        if price_match and not self._current.get("price"):
+            self._current["price"] = price_match.group(0).strip()
+            if self._current.get("title") and self._current.get("image"):
+                self.products.append(dict(self._current))
+                self._current = {}
+        # Title: first substantial text after a product link
+        if len(text) > 10 and not self._current.get("title") and "price" not in text.lower():
+            self._current["title"] = text[:120]
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._current.get("title") and self._current.get("image"):
+            # Flush if we have enough data
+            if len(self.products) < 20:
+                self.products.append(dict(self._current))
+            self._current = {}
+
+
+def search_google_shopping(style_query: str, gender: str = "", occasion: str = "", max_results: int = 8) -> dict:
+    """
+    Real-time Google Shopping search for garments.
+    Returns product images, titles, prices, and URLs.
+    
+    Flow:
+    1. Build search query from biometrics + style preferences
+    2. Fetch Google Shopping results
+    3. Parse product data (image, title, price, URL)
+    4. Filter for VTON-ready images (product-only, no models)
+    """
+    # Build the search query
+    parts = [style_query]
+    if gender:
+        parts.append(gender)
+    if occasion:
+        parts.append(occasion.replace("_", " "))
+    search_query = " ".join(parts) + " buy online India"
+    
+    encoded_query = urllib.parse.quote(search_query)
+    url = f"https://www.google.com/search?q={encoded_query}&tbm=shop&hl=en&gl=in"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    
+    products = []
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        
+        # Extract product data using regex patterns from Google Shopping HTML
+        # Pattern 1: Look for product image URLs
+        img_pattern = re.findall(r'(https?://(?:encrypted-tbn[0-9]*\.gstatic\.com|[^"\']+\.(?:jpg|jpeg|png|webp))(?:\?[^"\']*)?)', html)
+        # Pattern 2: Look for product titles in data attributes or aria labels
+        title_pattern = re.findall(r'(?:aria-label|data-title|title)="([^"]{15,120})"', html)
+        # Pattern 3: Look for prices
+        price_pattern = re.findall(r'(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{2})?', html)
+        # Pattern 4: Look for product links
+        link_pattern = re.findall(r'href="(/url\?q=([^&"]+)|https?://[^"\']*(?:shopping|product)[^"\']*)', html)
+        
+        # Match images with titles and prices
+        seen_images = set()
+        for i, img_url in enumerate(img_url for img_url in img_pattern):
+            if img_url in seen_images:
+                continue
+            if "gstatic.com" in img_url and "encrypted" in img_url:
+                # Google thumbnail — skip, too small
+                continue
+            seen_images.add(img_url)
+            
+            product = {
+                "image_url": img_url,
+                "title": title_pattern[i] if i < len(title_pattern) else f"Product {i+1}",
+                "price": price_pattern[i] if i < len(price_pattern) else "",
+                "url": "",
+                "source": "google_shopping",
+            }
+            
+            # Try to find matching link
+            if i < len(link_pattern):
+                link = link_pattern[i]
+                if isinstance(link, tuple):
+                    link = link[1] or link[0]
+                if link.startswith("/url?q="):
+                    link = link[8:]
+                product["url"] = link
+            
+            products.append(product)
+            if len(products) >= max_results:
+                break
+        
+        print(f"🛒 [google_shopping] Found {len(products)} products for query: {search_query[:60]}")
+        
+    except Exception as e:
+        print(f"⚠️ [google_shopping] Search failed: {e}")
+    
+    # Fallback: if Google Shopping returns nothing, search our global inventory
+    if not products:
+        print("🔄 [google_shopping] Falling back to global inventory search")
+        return {"success": False, "error": "google_shopping_empty", "products": [], "fallback": True}
+    
+    return {"success": True, "products": products, "query": search_query}
+
+
+def search_and_prepare_garments(client: "OpenAI", biometrics: dict, occasion: str, vibe_id: str, user_image: str) -> list:
+    """
+    Full garment search + preparation pipeline:
+    1. Generate search keywords from biometrics
+    2. Search Google Shopping for diverse garments
+    3. Also search Supabase global inventory
+    4. Merge and deduplicate results
+    5. Return top candidates with clean flat-lay URLs
+    
+    Returns list of dicts: [{title, garment_url, flat_lay_url, price, platform, category}]
+    """
+    gender = biometrics.get("gender_presentation", "person")
+    body_type = biometrics.get("body_type", "average")
+    undertone = biometrics.get("undertone", "")
+    fitness = biometrics.get("fitness_level", "")
+    
+    # Build diverse search queries — one per garment category
+    categories = ["t-shirt", "shirt", "jacket", "hoodie", "trousers", "sneakers"]
+    all_candidates = []
+    
+    for cat in categories[:3]:  # Search top 3 categories to stay fast
+        query = f"{gender}'s {cat} {occasion.replace('_', ' ')} {VIBE_PRESETS.get(vibe_id, {}).get('label', '')}"
+        if undertone:
+            query += f" {undertone} tone"
+        
+        # Google Shopping search
+        gs_result = search_google_shopping(query, gender=gender, occasion=occasion, max_results=4)
+        for p in gs_result.get("products", []):
+            all_candidates.append({
+                "title": p.get("title", ""),
+                "garment_url": p.get("image_url", ""),
+                "flat_lay_url": p.get("image_url", ""),  # Will be cleaned by rembg
+                "price": p.get("price", ""),
+                "platform": "Google Shopping",
+                "category": cat,
+                "url": p.get("url", ""),
+                "needs_extraction": True,  # Flag: needs rembg cleanup
+            })
+        
+        # Supabase inventory search (diverse categories)
+        inv_result = search_global_inventory(
+            client=client,
+            style_query=query,
+            category="",  # No category filter for diversity
+            limit=4,
+        )
+        for m in inv_result.get("matches", []):
+            all_candidates.append({
+                "title": m.get("title", ""),
+                "garment_url": m.get("flat_lay_url") or m.get("image_url", ""),
+                "flat_lay_url": m.get("flat_lay_url") or m.get("image_url", ""),
+                "price": m.get("price", ""),
+                "platform": m.get("network", "GLOBAL"),
+                "category": m.get("category", cat),
+                "url": m.get("checkout_url") or m.get("affiliate_url", ""),
+                "needs_extraction": False,  # Already clean
+                "similarity": m.get("similarity", 0),
+            })
+    
+    # Deduplicate by category — keep best 1-2 per category
+    seen = {}
+    diverse = []
+    for c in all_candidates:
+        cat = c.get("category", "unknown")
+        if cat not in seen:
+            seen[cat] = 0
+        if seen[cat] < 2:  # Max 2 per category
+            diverse.append(c)
+            seen[cat] += 1
+    
+    # Sort: Google Shopping results first (more diverse), then inventory
+    diverse.sort(key=lambda x: 0 if x["platform"] == "Google Shopping" else 1)
+    
+    print(f"🛍️ [garment_search] {len(diverse)} diverse candidates across {len(seen)} categories")
+    return diverse[:6]  # Return top 6 for VTON
+
+
+# ============================================================================
 #  SECTION 1: OPENAI + REPLICATE FUNCTIONS
 #  Uses GPT-4o for fashion recommendations + Replicate FLUX for images
 # ============================================================================
@@ -742,6 +961,58 @@ def infer_biometrics_from_input(skin_tone_label: str, body_shape: str, gender: s
         "gender_presentation": gender_presentation,
         "confidence": 0.95,  # User-selected, so high confidence
     }
+
+
+def analyze_physique_from_image(client: "OpenAI", image_data_url: str) -> dict:
+    """
+    Run GPT-4o-mini vision analysis on the uploaded selfie to extract
+    detailed body data points: skin tone, undertone, body shape, face shape,
+    hair, fitness level, proportions, etc.
+    
+    Returns a dict with physique data that enriches the biometrics.
+    Falls back to empty dict on failure (pipeline continues with user selections).
+    """
+    if not image_data_url or not client:
+        return {}
+
+    prompt = """Analyze this person's appearance for fashion styling. Return ONLY a JSON object:
+{
+  "skin_tone_mst": <1-10 Monk Scale>,
+  "undertone": "warm|cool|neutral|olive",
+  "body_shape": "hourglass|pear|apple|rectangle|inverted_triangle|athletic|curvy",
+  "face_shape": "oval|round|square|heart|oblong|diamond",
+  "hair_color": "black|brown|blonde|red|auburn|grey|white|highlighted",
+  "hair_texture": "straight|wavy|curly|coily",
+  "fitness_level": "slim|average|athletic|muscular|plus_size",
+  "complexion": "clear|freckled|tanned|dusky|radiant|matte",
+  "shoulder_width": "narrow|average|broad",
+  "height_estimate": "petite|average|tall",
+  "body_proportions": "short_torso|average|long_torso"
+}
+Be precise. Only include values you can confidently determine."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a fashion analyst. Return valid JSON only."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
+                ]},
+            ],
+            max_tokens=500,
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content or "{}"
+        # Extract JSON from response
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+    except Exception as e:
+        print(f"⚠️ [physique_analysis] GPT-4o-mini vision failed: {e}")
+    return {}
 
 
 def generate_fashion_recommendation(client: 'OpenAI', biometrics: dict, occasion: str, vibe_id: str) -> dict:
@@ -1196,11 +1467,12 @@ Rules:
 
 def _run_path_a_global(client: "OpenAI", biometrics: dict, occasion: str, vibe_id: str, user_image: str):
     """
-    Vector-first global market runtime:
-    1) GPT style query
-    2) Supabase vector search
-    3) IDM-VTON with winning flat-lay
-    4) Fallback to FLUX if retrieval path fails
+    Real-time garment search + VTON pipeline:
+    1) GPT-4o fashion recommendation
+    2) Google Shopping + Supabase search for diverse garments
+    3) Background removal on marketplace images (rembg)
+    4) IDM-VTON on top 1-2 garments
+    5) Return VTON result + flat-lay alternatives
     """
     vibe_label = VIBE_PRESETS.get(vibe_id, {}).get("label", "stylish look")
     occasion_key = occasion.replace("_", " ")
@@ -1217,61 +1489,65 @@ def _run_path_a_global(client: "OpenAI", biometrics: dict, occasion: str, vibe_i
         print(f"⚠️ [global] recommendation fallback: {e}")
         recommendation = {}
 
-    query_obj = generate_global_style_query(
+    # Search for diverse garments (Google Shopping + Supabase)
+    garment_candidates = search_and_prepare_garments(
         client=client,
         biometrics=biometrics,
         occasion=occasion,
         vibe_id=vibe_id,
         user_image=user_image,
     )
-    style_query = query_obj.get("style_query", "")
-    query_category = query_obj.get("category", "")
-    inventory_result = search_global_inventory(
-        client=client,
-        style_query=style_query,
-        category=query_category,
-        limit=6,
-    )
-    matches = inventory_result.get("matches", []) if inventory_result.get("success") else []
 
     affiliate_recommendations = []
-    outfit_pieces = []
     final_image_url = ""
     flux_image_url = ""
-    selected_match = None
     vton_applied = False
+    vton_product = None
 
-    if matches:
-        for m in matches[:3]:
-            checkout_url = m.get("checkout_url") or m.get("affiliate_url") or ""
+    if garment_candidates:
+        # Run VTON on top 1-2 candidates
+        for idx, candidate in enumerate(garment_candidates[:2]):
+            garment_url = candidate.get("flat_lay_url") or candidate.get("garment_url", "")
+            if not garment_url:
+                continue
+            
+            print(f"👗 [VTON] Running try-on for candidate {idx+1}: {candidate.get('title', 'unknown')[:50]}...")
+            vton_result = run_idm_vton(
+                user_image=user_image,
+                garment_image=garment_url,
+                description=candidate.get("title", "fashion garment"),
+            )
+            if vton_result:
+                final_image_url = vton_result
+                vton_applied = True
+                vton_product = candidate
+                print(f"✅ [VTON] Candidate {idx+1} succeeded: {vton_result[:80]}")
+                break  # Use first successful VTON
+            else:
+                print(f"⚠️ [VTON] Candidate {idx+1} failed, trying next...")
+
+        # Build affiliate recommendations from all candidates
+        for c in garment_candidates[:4]:
             affiliate_recommendations.append({
-                "product_name": m.get("title"),
-                "brand": m.get("brand") or m.get("network"),
-                "price": m.get("price"),
-                "currency": m.get("currency", "INR"),
-                "affiliate_url": checkout_url,
-                "checkout_url": checkout_url,
-                "exact_product_url": checkout_url,
-                "product_url": checkout_url,
-                "flat_lay_url": m.get("flat_lay_url") or m.get("image_url"),
-                "image_url": m.get("image_url"),
-                "platform": m.get("network", "GLOBAL"),
+                "product_name": c.get("title"),
+                "brand": c.get("platform", "GLOBAL"),
+                "price": c.get("price", ""),
+                "currency": "INR",
+                "affiliate_url": c.get("url", ""),
+                "checkout_url": c.get("url", ""),
+                "exact_product_url": c.get("url", ""),
+                "product_url": c.get("url", ""),
+                "flat_lay_url": c.get("flat_lay_url") or c.get("garment_url", ""),
+                "image_url": c.get("garment_url", ""),
+                "platform": c.get("platform", "GLOBAL"),
                 "recommended_for": f"{vibe_label} {occasion_key} look",
-                "gap_item": {"description": m.get("title"), "is_owned": False},
-                "similarity": m.get("similarity", 0.0),
+                "gap_item": {"description": c.get("title"), "is_owned": False},
+                "category": c.get("category", ""),
             })
-        selected_match = matches[0]
-        final_image_url = run_idm_vton(
-            user_image=user_image,
-            garment_image=selected_match.get("flat_lay_url") or selected_match.get("image_url") or "",
-            description=selected_match.get("title", "global product"),
-        )
-        vton_applied = bool(final_image_url)
-        if not final_image_url:
-            print("🚨 [SEVERE] Global vector match found but IDM-VTON failed. Falling back to FLUX.")
     else:
-        print("🚨 [SEVERE] Global vector inventory empty or retrieval failed. Falling back to FLUX.")
+        print("🚨 [SEVERE] No garment candidates found. Falling back to FLUX.")
 
+    # FLUX fallback if VTON failed
     if not final_image_url:
         try:
             flux_image_url = generate_flux_image(
@@ -1292,10 +1568,11 @@ def _run_path_a_global(client: "OpenAI", biometrics: dict, occasion: str, vibe_i
         "outfit_pieces": outfit_pieces,
         "final_image_url": final_image_url,
         "flux_image_url": flux_image_url,
-        "style_query": style_query,
-        "vector_category": query_category,
-        "vector_top_match": selected_match,
+        "style_query": garment_candidates[0].get("title", "") if garment_candidates else "",
+        "vector_category": garment_candidates[0].get("category", "") if garment_candidates else "",
+        "vector_top_match": garment_candidates[0] if garment_candidates else None,
         "vton_applied": vton_applied,
+        "garment_candidates": garment_candidates,  # All candidates for frontend flat-lay display
     }
 
 
@@ -1493,15 +1770,57 @@ class handler(BaseHTTPRequestHandler):
             client = OpenAI(api_key=api_key)
 
             # ═══════════════════════════════════════════════════════
-            # STEP 1: Infer biometrics from user input (instant, no API call)
+            # STEP 1: Infer biometrics from user input + image analysis
             # ═══════════════════════════════════════════════════════
             print("━" * 60)
             print("🚀 STEP 1: Inferring biometrics from user selections...")
             biometrics_result = infer_biometrics_from_input(skin_tone, body_shape, gender)
 
-            print(f"✅ Biometrics inferred: MST={biometrics_result.get('monk_skin_tone')}, "
+            # STEP 1B: Analyze physique from uploaded selfie (if provided)
+            physique_data = {}
+            if user_image:
+                print("📸 STEP 1B: Analyzing physique from uploaded image...")
+                try:
+                    physique_data = analyze_physique_from_image(client, user_image)
+                    if physique_data:
+                        print(f"✅ Physique analysis complete: {json.dumps(physique_data, default=str)[:200]}")
+                        # Merge physique data into biometrics (image analysis overrides dropdowns)
+                        if physique_data.get("skin_tone_mst"):
+                            biometrics_result["monk_skin_tone"] = int(physique_data["skin_tone_mst"])
+                            biometrics_result["mst_label"] = MST_LABELS.get(int(physique_data["skin_tone_mst"]), "Medium")
+                        if physique_data.get("undertone"):
+                            biometrics_result["undertone"] = physique_data["undertone"]
+                        if physique_data.get("body_shape"):
+                            biometrics_result["body_type"] = physique_data["body_shape"].replace("_", " ")
+                        if physique_data.get("face_shape"):
+                            biometrics_result["face_shape"] = physique_data["face_shape"]
+                        if physique_data.get("hair_color"):
+                            biometrics_result["hair_color"] = physique_data["hair_color"]
+                        if physique_data.get("hair_texture"):
+                            biometrics_result["hair_texture"] = physique_data["hair_texture"]
+                        if physique_data.get("fitness_level"):
+                            biometrics_result["fitness_level"] = physique_data["fitness_level"]
+                        if physique_data.get("complexion"):
+                            biometrics_result["complexion"] = physique_data["complexion"]
+                        if physique_data.get("shoulder_width"):
+                            biometrics_result["shoulder_width"] = physique_data["shoulder_width"]
+                        if physique_data.get("height_estimate"):
+                            biometrics_result["height_estimate"] = physique_data["height_estimate"]
+                        if physique_data.get("body_proportions"):
+                            biometrics_result["body_proportions"] = physique_data["body_proportions"]
+                        biometrics_result["physique_analyzed"] = True
+                    else:
+                        print("⚠️ Physique analysis returned empty, using user selections only")
+                        biometrics_result["physique_analyzed"] = False
+                except Exception as e:
+                    print(f"⚠️ Physique analysis failed: {e}, using user selections only")
+                    biometrics_result["physique_analyzed"] = False
+
+            print(f"✅ Biometrics finalized: MST={biometrics_result.get('monk_skin_tone')}, "
                   f"Gender={biometrics_result.get('gender_presentation')}, "
-                  f"Body={biometrics_result.get('body_type')}")
+                  f"Body={biometrics_result.get('body_type')}, "
+                  f"Undertone={biometrics_result.get('undertone', 'N/A')}, "
+                  f"Physique analyzed={biometrics_result.get('physique_analyzed', False)}")
 
             mst_value = biometrics_result.get("monk_skin_tone", 5)
             color_theory = MST_COLOR_THEORY.get(mst_value, MST_COLOR_THEORY[5])
@@ -1518,6 +1837,7 @@ class handler(BaseHTTPRequestHandler):
             global_style_query = ""
             global_query_category = ""
             vton_applied = False
+            garment_candidates = []
 
             # ═══════════════════════════════════════════════════════
             # PATH A: GLOBAL MARKET (FLUX + optional face swap + affiliates)
@@ -1540,6 +1860,7 @@ class handler(BaseHTTPRequestHandler):
                 global_style_query = path_a.get("style_query", "") or ""
                 global_query_category = path_a.get("vector_category", "") or ""
                 vton_applied = bool(path_a.get("vton_applied", False))
+                garment_candidates = path_a.get("garment_candidates", []) or []
 
             # ═══════════════════════════════════════════════════════
             # PATH B: MY NARRATIVE (Catalog match + IDM VTON)
@@ -1604,13 +1925,23 @@ class handler(BaseHTTPRequestHandler):
                 "success": True,
                 "pipeline_duration_seconds": pipeline_duration,
 
-                # Biometric data inferred from user selections
+                # Biometric data inferred from user selections + image analysis
                 "biometrics": {
                     "monk_skin_tone": mst_value,
                     "mst_label": MST_LABELS.get(mst_value, "Medium"),
                     "body_type": biometrics_result.get("body_type"),
                     "gender_presentation": biometrics_result.get("gender_presentation"),
                     "confidence": biometrics_result.get("confidence"),
+                    "undertone": biometrics_result.get("undertone"),
+                    "face_shape": biometrics_result.get("face_shape"),
+                    "hair_color": biometrics_result.get("hair_color"),
+                    "hair_texture": biometrics_result.get("hair_texture"),
+                    "fitness_level": biometrics_result.get("fitness_level"),
+                    "complexion": biometrics_result.get("complexion"),
+                    "shoulder_width": biometrics_result.get("shoulder_width"),
+                    "height_estimate": biometrics_result.get("height_estimate"),
+                    "body_proportions": biometrics_result.get("body_proportions"),
+                    "physique_analyzed": biometrics_result.get("physique_analyzed", False),
                 },
                 "ghost_closet": {
                     "success": True,
@@ -1668,6 +1999,9 @@ class handler(BaseHTTPRequestHandler):
                 "styling_tips": (recommendation or {}).get("styling_tips") or [],
                 "color_science": (recommendation or {}).get("color_science_note") or color_theory.get("undertone_note", ""),
                 "my_narrative_product": vton_product if source_mode == "my_narrative" else None,
+
+                # Garment candidates for frontend flat-lay display
+                "garment_candidates": garment_candidates,
 
                 # Gamification + User Profile Data
                 "gamification": gamification,

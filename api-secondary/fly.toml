@@ -1,5 +1,5 @@
 app = "drishti-api-v2"
-primary_region = "sin"
+primary_region = "ams"
 
 [build]
 
