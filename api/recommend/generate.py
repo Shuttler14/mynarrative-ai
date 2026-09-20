@@ -440,23 +440,44 @@ def handle_recommend(body: dict) -> dict:
         # ── Stage 7b: VTON Generation (if user photo provided) ─────────
         if user_image:
             drishti_url = os.environ.get("DRISHTI_URL", "https://drishti-api.fly.dev")
+            # Map outfit categories to VTON valid categories
+            VTON_CAT_MAP = {
+                "outerwear": "upper_body", "tops": "upper_body",
+                "bottoms": "lower_body", "dresses": "dresses",
+            }
+            # Categories that can't be tried on
+            SKIP_VTON = {"accessories", "footwear", "jewelry", "bags"}
+
             for outfit in outfits:
                 items = outfit.get("items", [])
                 if not items:
                     continue
-                # Pick hero garment: first outerwear, then top, else first item
+                # Pick hero garment: first wearable item (not accessory/footwear)
                 hero = None
                 for item in items:
                     cat = item.get("category", "")
+                    if cat in SKIP_VTON:
+                        continue
                     if cat in ("outerwear", "tops", "dresses"):
                         hero = item
                         break
+                    if not hero and cat in ("bottoms",):
+                        hero = item
                 if not hero:
-                    hero = items[0]
+                    # Fallback: first non-accessory item
+                    for item in items:
+                        if item.get("category", "") not in SKIP_VTON:
+                            hero = item
+                            break
+                if not hero:
+                    continue
 
                 garment_url = hero.get("image_url", "")
                 if not garment_url:
                     continue
+
+                raw_cat = hero.get("category", "upper_body")
+                vton_category = VTON_CAT_MAP.get(raw_cat, "upper_body")
 
                 try:
                     vton_resp = requests.post(
@@ -464,7 +485,7 @@ def handle_recommend(body: dict) -> dict:
                         json={
                             "person_image_url": user_image,
                             "garment_image_url": garment_url,
-                            "category": hero.get("category", "upper_body"),
+                            "category": vton_category,
                             "description": hero.get("title", ""),
                         },
                         timeout=90,
