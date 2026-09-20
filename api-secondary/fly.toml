@@ -1,4 +1,4 @@
-app = "drishti-api-v2"
+app = "drishti-api"
 primary_region = "ams"
 
 [build]

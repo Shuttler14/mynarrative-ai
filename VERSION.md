@@ -60,7 +60,7 @@ Examples:
 
 | Component | Version | URL | Status |
 |---|---|---|---|
-| Fly.io API | v2.1.0 | `https://drishti-api-v2.fly.dev` | Running |
+| Fly.io API | v2.1.0 | `https://drishti-api.fly.dev` | Running |
 | Vercel API | v2.1.0 | `https://drishti-api-blond.vercel.app` | Ready |
 | Shopify Theme | v2.1.0 | `https://mynarrative.store` | Live |
 | Widget | v2.1.0 | Floating widget on store | Live |
@@ -89,7 +89,7 @@ Examples:
 
 | Component | Version | URL | Status |
 |---|---|---|---|
-| Fly.io API | v2.0.0 | `https://drishti-api-v2.fly.dev` | Superseded |
+| Fly.io API | v2.0.0 | `https://drishti-api.fly.dev` | Superseded |
 | Vercel API | v2.0.0 | `https://drishti-api-blond.vercel.app` | Superseded |
 
 **Commits:**

@@ -26,7 +26,7 @@ No further changes to VTON code paths. Future work is recommendation engine only
 5. **Category validation** — IDM-VTON category validated against `upper_body/lower_body/dresses`
 
 ### Deployment
-- **Fly.io**: `https://drishti-api-v2.fly.dev` (region: sin, 512MB RAM, shared CPU)
+- **Fly.io**: `https://drishti-api.fly.dev` (region: sin, 512MB RAM, shared CPU)
 - **Vercel**: `https://drishti-api-blond.vercel.app` (Vercel Hobby, 60s timeout)
 - **Widget**: Calls Fly.io for VTON, proxies other endpoints to Vercel
 

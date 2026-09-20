@@ -308,9 +308,74 @@ def handle_recommend(body: dict) -> dict:
 
         # ── Stage 5: Scoring (already done above, results are scored) ──────
 
-        # ── Stage 6: Exploration (B2B partner brand injection) ─────────────
-        partner_products = []
-        if brand_name:
+        # ── Stage 6: Cross-Brand Network (Narrative Commerce Network) ────
+        exploration_items = []
+        network_mode = "brand_only"
+        if brand_id:
+            try:
+                from api.recommend.cross_ranking import get_cross_brand_ranker
+                ranker = get_cross_brand_ranker()
+
+                # Check host's network mode
+                host_prefs_result = _sb_request(
+                    "GET",
+                    f"/rest/v1/host_preferences?brand_id=eq.{brand_id}&select=network_mode"
+                )
+                if host_prefs_result and isinstance(host_prefs_result, list) and len(host_prefs_result) > 0:
+                    network_mode = host_prefs_result[0].get("network_mode", "brand_only")
+
+                if network_mode in ("curated_network", "open_network"):
+                    # Fetch eligible cross-brand products
+                    cross_products = _sb_request(
+                        "GET",
+                        f"/rest/v1/rpc/get_eligible_cross_products?"
+                        f"p_host_brand_id={brand_id}&p_gender={gender_final}"
+                        f"&p_price_min={budget['min']}&p_price_max={budget['max']}&p_limit=30"
+                    )
+
+                    if cross_products and isinstance(cross_products, list):
+                        # Enrich with brand positioning data
+                        for cp in cross_products:
+                            cp["brand_positioning"] = "mid"  # Would come from brand_dna
+                            cp["quality_score"] = 0.6
+                            cp["is_active"] = True
+
+                        # Build outfit context for ranking
+                        outfit_ctx = {
+                            "items": all_outfits[:3] if all_outfits else [],
+                            "avg_price": budget.get("target", 0),
+                            "anchor_item": anchor_item,
+                        }
+                        user_ctx = {
+                            "gender": gender_final,
+                            "size": body.get("size", ""),
+                            "preferred_colors": [],
+                            "age": body.get("age", 25),
+                        }
+
+                        # Run through the two-stage ranking engine
+                        ranked_cross = ranker.rank(
+                            candidates=cross_products,
+                            host_brand_id=brand_id,
+                            user_context=user_ctx,
+                            outfit_context=outfit_ctx,
+                            occasion=occasion_final,
+                            style=style_final,
+                        )
+
+                        # Take top cross-brand items as exploration
+                        for item in ranked_cross[:5]:
+                            item["_is_partner"] = True
+                            item["_is_sponsored"] = item.get("_sponsored", False)
+                            exploration_items.append(item)
+
+                        for item in exploration_items:
+                            record_impression(item.get("brand", ""))
+            except Exception as e:
+                print(f"[recommend] Cross-brand ranking error: {e}")
+
+        # Fallback: legacy partner exploration if no cross-brand results
+        if not exploration_items and brand_name:
             partner_products = filter_partner_products(
                 host_brand=brand_name,
                 gender=gender_final,
@@ -318,27 +383,24 @@ def handle_recommend(body: dict) -> dict:
                 max_price=budget["max"],
                 limit=15,
             )
+            if partner_products:
+                for pp in partner_products:
+                    emb = generate_product_embedding(pp)
+                    pp["embedding_vector"] = emb["embedding"]
+                    pp["_attributes"] = emb["attributes"]
+                    pp["_is_partner"] = True
 
-        # Inject exploration items from partner brands
-        exploration_items = []
-        if partner_products:
-            for pp in partner_products:
-                emb = generate_product_embedding(pp)
-                pp["embedding_vector"] = emb["embedding"]
-                pp["_attributes"] = emb["attributes"]
-                pp["_is_partner"] = True
-
-            scored_partners = score_products(
-                partner_products,
-                query_embedding=query_embedding,
-                anchor=anchor_item,
-                occasion=occasion_final,
-                style=style_final,
-                budget=budget,
-            )
-            exploration_items = scored_partners[:3]
-            for item in exploration_items:
-                record_impression(item.get("brand", ""))
+                scored_partners = score_products(
+                    partner_products,
+                    query_embedding=query_embedding,
+                    anchor=anchor_item,
+                    occasion=occasion_final,
+                    style=style_final,
+                    budget=budget,
+                )
+                exploration_items = scored_partners[:3]
+                for item in exploration_items:
+                    record_impression(item.get("brand", ""))
 
         # ── Stage 7: Outfit Assembly + Explainability ──────────────────────
         # Group items into outfits
@@ -407,6 +469,8 @@ def handle_recommend(body: dict) -> dict:
                 "budget_target": budget["target"],
             },
             "partner_items": len(exploration_items),
+            "network_mode": network_mode,
+            "network_enabled": network_mode in ("curated_network", "open_network"),
         }
 
     except Exception as e:

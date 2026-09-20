@@ -81,6 +81,23 @@ def handle_bootstrap(body: dict) -> dict:
     widget_config = brand_result[0].get("widget_config", {}) if brand_result else {}
     brand_name = brand_result[0].get("name", "AI Stylist") if brand_result else "AI Stylist"
 
+    # Get network mode
+    network_mode = "brand_only"
+    network_config = {}
+    host_prefs = _sb_request("GET", f"/rest/v1/host_preferences?brand_id=eq.{brand_id}&select=network_mode")
+    if host_prefs and isinstance(host_prefs, list) and len(host_prefs) > 0:
+        network_mode = host_prefs[0].get("network_mode", "brand_only")
+        if network_mode != "brand_only":
+            # Load category rules and exclusions for frontend display
+            cat_rules = _sb_request("GET", f"/rest/v1/host_category_rules?brand_id=eq.{brand_id}&select=*")
+            brand_excl = _sb_request("GET", f"/rest/v1/brand_exclusions?host_brand_id=eq.{brand_id}&select=excluded_brand_id")
+            network_config = {
+                "show_cross_brand": network_mode in ("curated_network", "open_network"),
+                "show_sponsored_badge": True,
+                "category_count": len(cat_rules) if isinstance(cat_rules, list) else 0,
+                "excluded_brand_count": len(brand_excl) if isinstance(brand_excl, list) else 0,
+            }
+
     # Create session token
     import base64
     session_payload = {
@@ -98,7 +115,9 @@ def handle_bootstrap(body: dict) -> dict:
             "primary_color": widget_config.get("primary_color", "#39A596"),
             "position": widget_config.get("position", "bottom-right"),
             "greeting": widget_config.get("greeting", f"Hi! I'm {brand_name}'s AI stylist."),
-            "brand_name": brand_name
+            "brand_name": brand_name,
         },
-        "subscription_status": "active"
+        "network_mode": network_mode,
+        "network_config": network_config,
+        "subscription_status": "active",
     }

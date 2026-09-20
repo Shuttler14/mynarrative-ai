@@ -23,6 +23,16 @@ from api.closet.items import handle_closet_items
 from api.recommend.generate import handle_recommend
 from api.subscription.status import handle_subscription_status
 from api.health.check import handle_health
+from api.sponsored.campaigns import (
+    handle_create_campaign, handle_list_campaigns, handle_campaign_performance,
+    handle_update_campaign, handle_pause_campaign, handle_resume_campaign,
+    handle_delete_campaign, handle_pricing_tiers,
+)
+from api.analytics import (
+    track_network_event, get_brand_network_report, get_product_performance,
+)
+from api.recommend.eligibility import EligibilityEngine
+from api.recommend.network_compatibility import NetworkCompatibilityScorer
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
@@ -69,21 +79,75 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        from urllib.parse import urlparse
-        path = urlparse(self.path).path.rstrip("/")
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        query = parse_qs(parsed.query)
 
-        # Bot check
         ua = self.headers.get("User-Agent", "")
         if is_bot_request(ua):
             self._respond(403, {"error": "forbidden"})
             return
 
+        # ── Public GET endpoints ──────────────────────────────────────
         if path == "/api/health":
             if not self._rate_limit_check("default"):
                 return
             self._respond(200, handle_health())
+
+        elif path == "/api/sponsored/pricing":
+            if not self._rate_limit_check("default"):
+                return
+            self._respond(200, handle_pricing_tiers())
+
+        # ── Authenticated GET endpoints ───────────────────────────────
         else:
-            self._respond(404, {"error": "not_found"})
+            api_key = self.headers.get("X-API-Key", "")
+            if not validate_api_key_format(api_key):
+                self._respond(401, {"error": "invalid_api_key_format"})
+                return
+            brand_id = validate_api_key(api_key)
+            if not brand_id:
+                self._respond(401, {"error": "invalid_api_key"})
+                return
+
+            if path == "/api/sponsored/campaigns":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, handle_list_campaigns(brand_id))
+
+            elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/performance"):
+                if not self._rate_limit_check("default"):
+                    return
+                campaign_id = path.split("/")[-2]
+                self._respond(200, handle_campaign_performance(campaign_id))
+
+            elif path == "/api/network/report":
+                if not self._rate_limit_check("default"):
+                    return
+                days = int(query.get("days", ["30"])[0])
+                self._respond(200, get_brand_network_report(brand_id, days))
+
+            elif path.startswith("/api/network/product/") and path.endswith("/performance"):
+                if not self._rate_limit_check("default"):
+                    return
+                product_id = path.split("/")[-2]
+                days = int(query.get("days", ["30"])[0])
+                self._respond(200, get_product_performance(product_id, days))
+
+            elif path == "/api/recommend/compatibility":
+                if not self._rate_limit_check("default"):
+                    return
+                other_brand_id = query.get("brand_id", [""])[0]
+                if not other_brand_id:
+                    self._respond(400, {"error": "brand_id query param required"})
+                    return
+                scorer = NetworkCompatibilityScorer()
+                score = scorer.compute_pair_score(brand_id, other_brand_id)
+                self._respond(200, score)
+
+            else:
+                self._respond(404, {"error": "not_found"})
 
     def do_POST(self):
         try:
@@ -200,11 +264,78 @@ class handler(BaseHTTPRequestHandler):
                     body = sanitize_body(body, allowed_fields={
                         "user_id", "session_token", "occasion", "price_tier",
                         "include_closet", "outfit_count", "brand_id", "user_id",
+                        "price_range_min", "price_range_max", "gender", "style",
+                        "vibe", "skin_tone", "body_shape", "anchor_item",
+                        "user_context", "currency",
                     })
                     body["brand_id"] = brand_id
                     body["user_id"] = user_id
                     result = handle_recommend(body)
                     self._respond(200, result)
+
+                # ── Sponsored Campaign Endpoints ──────────────────────
+                elif path == "/api/sponsored/campaigns":
+                    if not self._rate_limit_check("default"):
+                        return
+                    result = handle_create_campaign(body, brand_id)
+                    status = 400 if result.get("error") else 201
+                    self._respond(status, result)
+
+                elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/update"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    campaign_id = path.split("/")[-2]
+                    result = handle_update_campaign(campaign_id, body, brand_id)
+                    self._respond(200, result)
+
+                elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/pause"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    campaign_id = path.split("/")[-2]
+                    result = handle_pause_campaign(campaign_id, brand_id)
+                    self._respond(200, result)
+
+                elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/resume"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    campaign_id = path.split("/")[-2]
+                    result = handle_resume_campaign(campaign_id, brand_id)
+                    self._respond(200, result)
+
+                elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/delete"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    campaign_id = path.split("/")[-2]
+                    result = handle_delete_campaign(campaign_id, brand_id)
+                    self._respond(200, result)
+
+                # ── Network Event Tracking ────────────────────────────
+                elif path == "/api/network/event":
+                    if not self._rate_limit_check("default"):
+                        return
+                    result = track_network_event(
+                        event_type=body.get("event_type", ""),
+                        brand_id=body.get("brand_id", brand_id),
+                        user_id=body.get("user_id", user_id),
+                        product_id=body.get("product_id", ""),
+                        session_id=body.get("session_id", ""),
+                        host_brand_id=body.get("host_brand_id", brand_id),
+                        campaign_id=body.get("campaign_id", ""),
+                        event_data=body.get("event_data", {}),
+                    )
+                    self._respond(200, result)
+
+                # ── Eligibility Check ─────────────────────────────────
+                elif path == "/api/recommend/eligibility":
+                    if not self._rate_limit_check("default"):
+                        return
+                    engine = EligibilityEngine()
+                    candidate = body.get("product", {})
+                    host_prefs = body.get("host_preferences", {})
+                    category_rules = body.get("category_rules", {})
+                    user_context = body.get("user_context", {})
+                    eligible, reason = engine.check(candidate, brand_id, host_prefs, category_rules, user_context)
+                    self._respond(200, {"eligible": eligible, "reason": reason})
 
                 else:
                     self._respond(404, {"error": "not_found"})
