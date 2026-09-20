@@ -101,57 +101,57 @@ class handler(BaseHTTPRequestHandler):
                     return
                 self._respond(200, handle_pricing_tiers())
 
-        # ── Authenticated GET endpoints ───────────────────────────────
-        else:
-            api_key = self.headers.get("X-API-Key", "")
-            if not validate_api_key_format(api_key):
-                self._respond(401, {"error": "invalid_api_key_format"})
-                return
-            brand_id = validate_api_key(api_key)
-            if not brand_id:
-                self._respond(401, {"error": "invalid_api_key"})
-                return
-
-            if path == "/api/sponsored/campaigns":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, handle_list_campaigns(brand_id))
-
-            elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/performance"):
-                if not self._rate_limit_check("default"):
-                    return
-                campaign_id = path.split("/")[-2]
-                self._respond(200, handle_campaign_performance(campaign_id))
-
-            elif path == "/api/network/report":
-                if not self._rate_limit_check("default"):
-                    return
-                days = int(query.get("days", ["30"])[0])
-                self._respond(200, get_brand_network_report(brand_id, days))
-
-            elif path.startswith("/api/network/product/") and path.endswith("/performance"):
-                if not self._rate_limit_check("default"):
-                    return
-                product_id = path.split("/")[-2]
-                days = int(query.get("days", ["30"])[0])
-                self._respond(200, get_product_performance(product_id, days))
-
-            elif path == "/api/recommend/compatibility":
-                if not self._rate_limit_check("default"):
-                    return
-                other_brand_id = query.get("brand_id", [""])[0]
-                if not other_brand_id:
-                    self._respond(400, {"error": "brand_id query param required"})
-                    return
-                try:
-                    scorer = NetworkCompatibilityScorer()
-                    score = scorer.compute_pair_score(brand_id, other_brand_id)
-                    self._respond(200, score)
-                except Exception as e:
-                    self._respond(500, {"error": str(e)})
-
+            # ── Authenticated GET endpoints ───────────────────────────────
             else:
-                self._respond(404, {"error": "not_found"})
+                api_key = self.headers.get("X-API-Key", "")
+                if not validate_api_key_format(api_key):
+                    self._respond(401, {"error": "invalid_api_key_format"})
+                    return
+                brand_id = validate_api_key(api_key)
+                if not brand_id:
+                    self._respond(401, {"error": "invalid_api_key"})
+                    return
+
+                if path == "/api/sponsored/campaigns":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_list_campaigns(brand_id))
+
+                elif path.startswith("/api/sponsored/campaigns/") and path.endswith("/performance"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    campaign_id = path.split("/")[-2]
+                    self._respond(200, handle_campaign_performance(campaign_id))
+
+                elif path == "/api/network/report":
+                    if not self._rate_limit_check("default"):
+                        return
+                    days = int(query.get("days", ["30"])[0])
+                    self._respond(200, get_brand_network_report(brand_id, days))
+
+                elif path.startswith("/api/network/product/") and path.endswith("/performance"):
+                    if not self._rate_limit_check("default"):
+                        return
+                    product_id = path.split("/")[-2]
+                    days = int(query.get("days", ["30"])[0])
+                    self._respond(200, get_product_performance(product_id, days))
+
+                elif path == "/api/recommend/compatibility":
+                    if not self._rate_limit_check("default"):
+                        return
+                    other_brand_id = query.get("brand_id", [""])[0]
+                    if not other_brand_id:
+                        self._respond(400, {"error": "brand_id query param required"})
+                        return
+                    try:
+                        scorer = NetworkCompatibilityScorer()
+                        score = scorer.compute_pair_score(brand_id, other_brand_id)
+                        self._respond(200, score)
+                    except Exception as e:
+                        self._respond(500, {"error": str(e)})
+
+                else:
+                    self._respond(404, {"error": "not_found"})
 
         except Exception as e:
             self._respond(500, {"error": sanitize_error(e)})
