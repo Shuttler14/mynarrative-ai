@@ -79,11 +79,12 @@ def price_gate_asymmetric(
 
 # Default weights
 DEFAULT_WEIGHTS = {
-    "kg_compatibility": 0.30,   # Knowledge Graph hard rules
-    "vector_similarity": 0.25,  # Semantic vector similarity
+    "kg_compatibility": 0.25,   # Knowledge Graph hard rules
+    "vector_similarity": 0.20,  # Semantic vector similarity
     "style_cohesion": 0.15,     # Style archetype match
     "color_harmony": 0.10,      # Color theory score
     "attribute_match": 0.10,    # Structured attribute similarity
+    "quality_rating": 0.10,     # User ratings & reviews
     "price_fit": 0.10,          # Price gate score (applied as multiplier)
 }
 
@@ -180,6 +181,41 @@ def score_attribute_match(product: dict, query_attributes: dict) -> float:
     return compute_attribute_similarity(product_attrs, query_attributes)
 
 
+def score_quality_rating(product: dict) -> float:
+    """
+    Score product quality based on user ratings and review count.
+    Uses Bayesian average to avoid bias from products with few reviews.
+    
+    Formula: (C * m + v * R) / (C + v)
+    Where:
+        C = confidence parameter (min reviews for full weight)
+        m = global average rating
+        v = number of reviews
+        R = product average rating
+    """
+    avg_rating = float(product.get("avg_rating", 0) or 0)
+    review_count = int(product.get("review_count", 0) or 0)
+
+    # No reviews — return neutral score
+    if review_count == 0:
+        return 0.5
+
+    # Bayesian average parameters
+    C = 5       # Minimum reviews for full confidence
+    m = 3.5     # Global average rating (assuming 1-5 scale)
+
+    # Bayesian average
+    bayesian = (C * m + review_count * avg_rating) / (C + review_count)
+
+    # Normalize to 0-1 (assuming 1-5 star scale)
+    normalized = (bayesian - 1) / 4  # 1 star = 0, 5 stars = 1
+
+    # Bonus for high review count (social proof)
+    volume_bonus = min(0.1, review_count / 500)
+
+    return min(1.0, normalized + volume_bonus)
+
+
 # ── Main Scoring Pipeline ─────────────────────────────────────────────────
 
 def score_product(
@@ -205,6 +241,7 @@ def score_product(
     style_score = score_style_cohesion(product, style)
     color_score = score_color_harmony(product, anchor, palette_colors)
     attr_score = score_attribute_match(product, query_attributes) if query_attributes else 0.5
+    quality_score = score_quality_rating(product)
 
     # Weighted sum (before price gate)
     weighted_sum = (
@@ -212,7 +249,8 @@ def score_product(
         w["vector_similarity"] * vec_score +
         w["style_cohesion"] * style_score +
         w["color_harmony"] * color_score +
-        w["attribute_match"] * attr_score
+        w["attribute_match"] * attr_score +
+        w.get("quality_rating", 0.10) * quality_score
     )
 
     # Price gate (sigmoid multiplier)
@@ -235,6 +273,7 @@ def score_product(
             "style_cohesion": round(style_score, 3),
             "color_harmony": round(color_score, 3),
             "attribute_match": round(attr_score, 3),
+            "quality_rating": round(quality_score, 3),
         },
         "weights": w,
     }

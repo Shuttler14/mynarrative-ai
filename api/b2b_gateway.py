@@ -38,6 +38,7 @@ from api.dashboard import (
     handle_dashboard_network_settings, handle_dashboard_analytics,
     handle_dashboard_wallet,
 )
+from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
@@ -394,6 +395,27 @@ class handler(BaseHTTPRequestHandler):
                         return
                     body = sanitize_body(body, allowed_fields={"amount", "payment_method"})
                     self._respond(200, {"error": "topup_not_implemented"})
+
+                # ── Brand Onboarding (Shopify Sync) ─────────────────
+                elif path == "/api/brand/onboard-shopify":
+                    if not self._rate_limit_check("default"):
+                        return
+                    body = sanitize_body(body, allowed_fields={"shop_url", "access_token"})
+                    if not body.get("shop_url") or not body.get("access_token"):
+                        self._respond(400, {"error": "shop_url and access_token required"})
+                        return
+                    result = start_shopify_sync(brand_id, body["shop_url"], body["access_token"])
+                    self._respond(200, result)
+
+                elif path == "/api/brand/register-webhooks":
+                    if not self._rate_limit_check("default"):
+                        return
+                    body = sanitize_body(body, allowed_fields={"shop_url", "access_token"})
+                    if not body.get("shop_url") or not body.get("access_token"):
+                        self._respond(400, {"error": "shop_url and access_token required"})
+                        return
+                    result = register_shopify_webhooks(brand_id, body["shop_url"], body["access_token"])
+                    self._respond(200, result)
 
                 else:
                     self._respond(404, {"error": "not_found"})
