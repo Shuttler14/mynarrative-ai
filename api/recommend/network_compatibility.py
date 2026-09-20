@@ -104,8 +104,11 @@ class NetworkCompatibilityScorer:
             "recommendation": recommendation,
         }
 
-        # Persist
-        self._save_pair_score(result)
+        # Persist (non-critical, swallow errors)
+        try:
+            self._save_pair_score(result)
+        except Exception:
+            pass
 
         return result
 
