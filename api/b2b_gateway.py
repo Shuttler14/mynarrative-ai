@@ -33,6 +33,11 @@ from api.analytics import (
 )
 from api.recommend.eligibility import EligibilityEngine
 from api.recommend.network_compatibility import NetworkCompatibilityScorer
+from api.dashboard import (
+    handle_dashboard_overview, handle_dashboard_products,
+    handle_dashboard_network_settings, handle_dashboard_analytics,
+    handle_dashboard_wallet,
+)
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
@@ -149,6 +154,33 @@ class handler(BaseHTTPRequestHandler):
                         self._respond(200, score)
                     except Exception as e:
                         self._respond(500, {"error": str(e)})
+
+                # ── Dashboard Endpoints ────────────────────────────────
+                elif path == "/api/dashboard/overview":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_dashboard_overview(brand_id))
+
+                elif path == "/api/dashboard/products":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_dashboard_products(brand_id))
+
+                elif path == "/api/dashboard/network-settings":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_dashboard_network_settings(brand_id))
+
+                elif path == "/api/dashboard/analytics":
+                    if not self._rate_limit_check("default"):
+                        return
+                    days = int(query.get("days", ["30"])[0])
+                    self._respond(200, handle_dashboard_analytics(brand_id, days))
+
+                elif path == "/api/dashboard/wallet":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_dashboard_wallet(brand_id))
 
                 else:
                     self._respond(404, {"error": "not_found"})
@@ -343,6 +375,25 @@ class handler(BaseHTTPRequestHandler):
                     user_context = body.get("user_context", {})
                     eligible, reason = engine.check(candidate, brand_id, host_prefs, category_rules, user_context)
                     self._respond(200, {"eligible": eligible, "reason": reason})
+
+                # ── Dashboard POST Endpoints ──────────────────────────
+                elif path == "/api/dashboard/network-settings":
+                    if not self._rate_limit_check("default"):
+                        return
+                    body = sanitize_body(body, allowed_fields={
+                        "vton_enabled", "receive_recommendations",
+                        "distribute_products", "promote_products",
+                        "promotion_budget", "max_cpc_bid",
+                        "target_categories", "category_rules",
+                        "competitor_exclusions", "cross_brand_density",
+                    })
+                    self._respond(200, handle_dashboard_network_settings(brand_id, body))
+
+                elif path == "/api/dashboard/wallet/topup":
+                    if not self._rate_limit_check("default"):
+                        return
+                    body = sanitize_body(body, allowed_fields={"amount", "payment_method"})
+                    self._respond(200, {"error": "topup_not_implemented"})
 
                 else:
                     self._respond(404, {"error": "not_found"})
