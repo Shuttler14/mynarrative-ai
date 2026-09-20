@@ -18,6 +18,7 @@ def _sb_request(method: str, path: str, payload: dict = None) -> Optional[list |
         "apikey": key,
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
+        "Prefer": "return=representation",
     }
     full_url = f"{url.rstrip('/')}{path}"
     try:
