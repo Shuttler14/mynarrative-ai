@@ -24,8 +24,8 @@
   ],
   "functions": {
     "api/b2b_gateway.py": {
-      "maxDuration": 30,
-      "memory": 256
+      "maxDuration": 60,
+      "memory": 512
     },
     "api/brand_search_api.py": {
       "maxDuration": 30,
