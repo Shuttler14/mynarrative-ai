@@ -148,7 +148,9 @@ class handler(BaseHTTPRequestHandler):
                         score = scorer.compute_pair_score(brand_id, other_brand_id)
                         self._respond(200, score)
                     except Exception as e:
-                        self._respond(500, {"error": str(e)})
+                        import traceback
+                        tb = traceback.format_exc()
+                        self._respond(500, {"error": str(e), "type": type(e).__name__, "trace": tb[-500:]})
 
                 else:
                     self._respond(404, {"error": "not_found"})
