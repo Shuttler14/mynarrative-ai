@@ -308,8 +308,10 @@ class NetworkCompatibilityScorer:
             "GET",
             f"/rest/v1/brand_dna?brand_id=eq.{brand_id}&select=style_profile,price_positioning,target_demographics,category_strength,color_palette,formality_range"
         )
-        if result and len(result) > 0:
+        if isinstance(result, list) and len(result) > 0:
             return result[0]
+        if isinstance(result, dict) and "style_profile" in result:
+            return result
         return {}
 
     def _save_pair_score(self, data: dict):
@@ -319,6 +321,8 @@ class NetworkCompatibilityScorer:
             f"/rest/v1/brand_pair_compatibility?"
             f"brand_a_id=eq.{data['brand_a_id']}&brand_b_id=eq.{data['brand_b_id']}&select=id"
         )
+        is_list = isinstance(existing, list) and len(existing) > 0
+        is_dict = isinstance(existing, dict) and "id" in existing
 
         payload = {
             "brand_a_id": data["brand_a_id"],
@@ -332,7 +336,7 @@ class NetworkCompatibilityScorer:
             "tier": data["tier"],
         }
 
-        if existing and len(existing) > 0:
+        if is_list or is_dict:
             _sb_request(
                 "PATCH",
                 f"/rest/v1/brand_pair_compatibility?"
