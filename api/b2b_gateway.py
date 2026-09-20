@@ -79,26 +79,27 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(self.path)
-        path = parsed.path.rstrip("/")
-        query = parse_qs(parsed.query)
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/")
+            query = parse_qs(parsed.query)
 
-        ua = self.headers.get("User-Agent", "")
-        if is_bot_request(ua):
-            self._respond(403, {"error": "forbidden"})
-            return
-
-        # ── Public GET endpoints ──────────────────────────────────────
-        if path == "/api/health":
-            if not self._rate_limit_check("default"):
+            ua = self.headers.get("User-Agent", "")
+            if is_bot_request(ua):
+                self._respond(403, {"error": "forbidden"})
                 return
-            self._respond(200, handle_health())
 
-        elif path == "/api/sponsored/pricing":
-            if not self._rate_limit_check("default"):
-                return
-            self._respond(200, handle_pricing_tiers())
+            # ── Public GET endpoints ──────────────────────────────────────
+            if path == "/api/health":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, handle_health())
+
+            elif path == "/api/sponsored/pricing":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, handle_pricing_tiers())
 
         # ── Authenticated GET endpoints ───────────────────────────────
         else:
@@ -142,12 +143,18 @@ class handler(BaseHTTPRequestHandler):
                 if not other_brand_id:
                     self._respond(400, {"error": "brand_id query param required"})
                     return
-                scorer = NetworkCompatibilityScorer()
-                score = scorer.compute_pair_score(brand_id, other_brand_id)
-                self._respond(200, score)
+                try:
+                    scorer = NetworkCompatibilityScorer()
+                    score = scorer.compute_pair_score(brand_id, other_brand_id)
+                    self._respond(200, score)
+                except Exception as e:
+                    self._respond(500, {"error": str(e)})
 
             else:
                 self._respond(404, {"error": "not_found"})
+
+        except Exception as e:
+            self._respond(500, {"error": sanitize_error(e)})
 
     def do_POST(self):
         try:
