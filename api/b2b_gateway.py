@@ -273,7 +273,7 @@ class handler(BaseHTTPRequestHandler):
                         "include_closet", "outfit_count", "brand_id", "user_id",
                         "price_range_min", "price_range_max", "gender", "style",
                         "vibe", "skin_tone", "body_shape", "anchor_item",
-                        "user_context", "currency",
+                        "user_context", "currency", "user_image",
                     })
                     body["brand_id"] = brand_id
                     body["user_id"] = user_id

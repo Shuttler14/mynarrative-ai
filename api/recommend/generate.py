@@ -121,7 +121,7 @@ def _match_closet_items(
 def handle_recommend(body: dict) -> dict:
     """
     Main recommendation endpoint handler.
-    
+
     Expected body:
     {
         "brand_id": "uuid",
@@ -141,6 +141,7 @@ def handle_recommend(body: dict) -> dict:
         "currency": "INR",
         "anchor_item": { ... },
         "user_context": "going to a cocktail party",
+        "user_image": "https://... or data:image/...",
     }
     """
     try:
@@ -161,6 +162,7 @@ def handle_recommend(body: dict) -> dict:
         currency = body.get("currency", "INR")
         anchor_item = body.get("anchor_item")
         user_context = body.get("user_context", "")
+        user_image = body.get("user_image", "")
 
         if not brand_id and not brand_name:
             return {"error": "brand_id or brand_name required"}
@@ -434,6 +436,48 @@ def handle_recommend(body: dict) -> dict:
             outfit["coherence_score"] = kg.score_outfit_coherence(
                 items, occasion_final
             )
+
+        # ── Stage 7b: VTON Generation (if user photo provided) ─────────
+        if user_image:
+            drishti_url = os.environ.get("DRISHTI_URL", "https://drishti-api.fly.dev")
+            for outfit in outfits:
+                items = outfit.get("items", [])
+                if not items:
+                    continue
+                # Pick hero garment: first outerwear, then top, else first item
+                hero = None
+                for item in items:
+                    cat = item.get("category", "")
+                    if cat in ("outerwear", "tops", "dresses"):
+                        hero = item
+                        break
+                if not hero:
+                    hero = items[0]
+
+                garment_url = hero.get("image_url", "")
+                if not garment_url:
+                    continue
+
+                try:
+                    vton_resp = requests.post(
+                        f"{drishti_url}/api/vton/try-on",
+                        json={
+                            "person_image_url": user_image,
+                            "garment_image_url": garment_url,
+                            "category": hero.get("category", "upper_body"),
+                            "description": hero.get("title", ""),
+                        },
+                        timeout=90,
+                    )
+                    vton_data = vton_resp.json()
+                    if vton_data.get("result_image"):
+                        outfit["vton_image"] = vton_data["result_image"]
+                        outfit["vton_engine"] = vton_data.get("engine", "idm-vton")
+                        outfit["vton_quality"] = vton_data.get("quality_score")
+                        outfit["vton_time_ms"] = vton_data.get("processing_time_ms")
+                        outfit["vton_hero"] = hero.get("title", "")
+                except Exception as e:
+                    print(f"[recommend] VTON error for outfit: {e}")
 
         # ── Session Persistence ────────────────────────────────────────────
         session_data = {
