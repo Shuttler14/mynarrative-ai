@@ -83,7 +83,7 @@ def handle_create_campaign(body: dict, brand_id: str) -> dict:
     if not name:
         return {"error": "Campaign name required"}
     if budget < 1000:
-        return {"error": "Minimum budget is ₹10,000"}
+        return {"error": "Minimum budget is ₹1,000"}
 
     # Determine tier and max boost
     tier = "starter"
@@ -109,16 +109,23 @@ def handle_create_campaign(body: dict, brand_id: str) -> dict:
 
     result = _sb_request("POST", "/rest/v1/sponsored_campaigns", campaign)
 
-    if result and isinstance(result, list) and len(result) > 0:
-        created = result[0]
-        return {
-            "success": True,
-            "campaign_id": created["id"],
-            "tier": tier,
-            "boost_pct": max_boost,
-            "budget": budget,
-            "status": "active",
-        }
+    # Supabase returns the created record(s) directly
+    if result:
+        if isinstance(result, list) and len(result) > 0:
+            created = result[0]
+        elif isinstance(result, dict):
+            created = result
+        else:
+            created = None
+        if created and created.get("id"):
+            return {
+                "success": True,
+                "campaign_id": created["id"],
+                "tier": tier,
+                "boost_pct": max_boost,
+                "budget": budget,
+                "status": "active",
+            }
 
     return {"error": "Failed to create campaign"}
 

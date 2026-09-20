@@ -90,8 +90,8 @@ def handle_dashboard_network_settings(brand_id: str, update: dict = None) -> dic
     """Get or update network settings for the brand."""
     try:
         if update:
-            existing = _sb_get(f"/rest/v1/host_preferences?brand_id=eq.{brand_id}&select=id", single=True)
-            if isinstance(existing, dict) and existing.get("id"):
+            existing = _sb_get(f"/rest/v1/host_preferences?brand_id=eq.{brand_id}&select=brand_id", single=True)
+            if isinstance(existing, dict) and existing.get("brand_id"):
                 sb_request("PATCH", f"/rest/v1/host_preferences?brand_id=eq.{brand_id}", update)
             else:
                 update["brand_id"] = brand_id
