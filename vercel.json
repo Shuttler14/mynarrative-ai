@@ -85,6 +85,7 @@
     { "source": "/api/brand/search-for-occasion",      "destination": "/api/brand_search_api" },
     { "source": "/api/brand/catalogs",                 "destination": "/api/brand_search_api" },
     { "source": "/api/syndicate/:path*",               "destination": "/api/syndicate/gateway" },
-    { "source": "/api/brand/register",                 "destination": "/api/b2b_gateway" }
+    { "source": "/api/brand/register",                 "destination": "/api/b2b_gateway" },
+    { "source": "/api/seed",                           "destination": "/api/seed_test" }
   ]
 }
