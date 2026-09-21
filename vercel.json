@@ -1,18 +1,27 @@
 {
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains; preload" },
-        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, private" }
-      ]
+  "functions": {
+    "api/b2b_gateway.py": {
+      "maxDuration": 60,
+      "memory": 512
+    },
+    "api/brand_search_api.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/syndicate/gateway.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/fashion_services.py": {
+      "maxDuration": 60,
+      "memory": 512,
+      "includeFiles": "api/**"
+    },
+    "api/checkout_api.py": {
+      "maxDuration": 60,
+      "memory": 512
     }
-  ],
+  },
   "rewrites": [
     { "source": "/api/cart",                           "destination": "/api/b2b_gateway" },
     { "source": "/api/cart/add",                       "destination": "/api/b2b_gateway" },
