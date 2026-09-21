@@ -536,7 +536,8 @@ def handle_recommend(body: dict) -> dict:
         }
 
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()[-600:]}
 
 
 def _enrich_items_with_purchase_urls(items: list[dict], brand_id: str = "") -> list[dict]:
