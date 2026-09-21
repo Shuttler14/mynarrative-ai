@@ -26,7 +26,8 @@ def handle_dashboard_overview(brand_id: str) -> dict:
     """Return dashboard overview: stats, recent activity, network status."""
     try:
         brand = _sb_get(f"/rest/v1/brands?id=eq.{brand_id}&select=name,widget_config,network_mode", single=True)
-        products = _sb_get(f"/rest/v1/brand_products?brand_id=eq.{brand_id}&select=id")
+        brand_name = brand.get("name", "Brand") if isinstance(brand, dict) else "Brand"
+        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_name}&select=id")
         product_count = len(products)
 
         campaigns = _sb_get(f"/rest/v1/sponsored_campaigns?brand_id=eq.{brand_id}&select=id,status,budget_spent,impressions,clicks,conversions")
@@ -48,7 +49,7 @@ def handle_dashboard_overview(brand_id: str) -> dict:
 
         return {
             "success": True,
-            "brand_name": brand.get("name", "Brand") if isinstance(brand, dict) else "Brand",
+            "brand_name": brand_name,
             "stats": {
                 "vton_sessions": total_impressions,
                 "cross_brand_impressions": total_impressions,
@@ -76,7 +77,9 @@ def handle_dashboard_overview(brand_id: str) -> dict:
 def handle_dashboard_products(brand_id: str) -> dict:
     """Return brand's products for the dashboard."""
     try:
-        products = _sb_get(f"/rest/v1/brand_products?brand_id=eq.{brand_id}&select=*&order=created_at.desc")
+        brand = _sb_get(f"/rest/v1/brands?id=eq.{brand_id}&select=name", single=True)
+        brand_name = brand.get("name", "") if isinstance(brand, dict) else ""
+        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_name}&select=*&order=created_at.desc")
         return {
             "success": True,
             "products": [{"id": p.get("id"), "title": p.get("title", ""), "price": p.get("price", 0), "category": p.get("category", ""), "image_url": p.get("image_url", ""), "product_url": p.get("product_url", ""), "eligible": p.get("eligible", True), "stock": p.get("stock", "in_stock"), "created_at": p.get("created_at", "")} for p in products],
