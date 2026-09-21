@@ -36,9 +36,14 @@ from api.recommend.network_compatibility import NetworkCompatibilityScorer
 from api.dashboard import (
     handle_dashboard_overview, handle_dashboard_products,
     handle_dashboard_network_settings, handle_dashboard_analytics,
-    handle_dashboard_wallet,
+    handle_dashboard_wallet, handle_network_partners,
 )
 from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
+from api.checkout import (
+    handle_cart, handle_checkout,
+    get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
+    create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
+)
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
@@ -183,8 +188,35 @@ class handler(BaseHTTPRequestHandler):
                         return
                     self._respond(200, handle_dashboard_wallet(brand_id))
 
+                elif path == "/api/network/partners":
+                    if not self._rate_limit_check("default"):
+                        return
+                    self._respond(200, handle_network_partners(brand_id))
+
                 else:
                     self._respond(404, {"error": "not_found"})
+
+            # ── Cart & Checkout (public, user_id based) ──────────────
+            if path == "/api/cart":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_cart(query))
+
+            elif path == "/api/checkout/address":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_addresses(query))
+
+            elif path == "/api/orders":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_orders(query))
+
+            elif path.startswith("/api/orders/"):
+                if not self._rate_limit_check("default"):
+                    return
+                order_id = path.split("/")[-1]
+                self._respond(200, get_order_detail(order_id))
 
         except Exception as e:
             self._respond(500, {"error": sanitize_error(e)})
@@ -387,6 +419,13 @@ class handler(BaseHTTPRequestHandler):
                         "promotion_budget", "max_cpc_bid",
                         "target_categories", "category_rules",
                         "competitor_exclusions", "cross_brand_density",
+                        "price_min", "price_max", "positioning", "styles",
+                        "men_accept_mode", "men_accept", "women_accept_mode", "women_accept",
+                        "external_price_min", "external_price_max",
+                        "exclude_brands", "exclude_categories", "block_competitors",
+                        "place_vton", "place_complete_the_look", "place_product_page", "place_cart",
+                        "dist_gender", "dist_host_categories", "dist_price_band",
+                        "promo_budget", "promo_categories",
                     })
                     self._respond(200, handle_dashboard_network_settings(brand_id, body))
 
@@ -419,6 +458,42 @@ class handler(BaseHTTPRequestHandler):
 
                 else:
                     self._respond(404, {"error": "not_found"})
+
+            # ── Cart & Checkout POST (public, user_id based) ─────────
+            if path == "/api/cart/add":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, add_to_cart(body))
+
+            elif path == "/api/cart/update":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, update_cart_item(body))
+
+            elif path == "/api/cart/remove":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, remove_from_cart({'item_id': [body.get('item_id')]}))
+
+            elif path == "/api/cart/clear":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, clear_cart({'user_id': [body.get('user_id')]}))
+
+            elif path == "/api/checkout/create":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, create_order(body))
+
+            elif path == "/api/checkout/verify":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, verify_payment(body))
+
+            elif path == "/api/checkout/address":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, save_address(body))
 
         except json.JSONDecodeError:
             self._respond(400, {"error": "invalid_json"})

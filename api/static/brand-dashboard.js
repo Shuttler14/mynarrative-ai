@@ -191,6 +191,16 @@
     return months[dt.getMonth()] + ' ' + dt.getDate();
   }
 
+  function toDateInputValue(d) {
+    if (!d) return '';
+    var dt = new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    var yyyy = dt.getFullYear();
+    var mm = String(dt.getMonth() + 1).padStart(2, '0');
+    var dd = String(dt.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
   function fmtTimeAgo(d) {
     if (!d) return '';
     var now = Date.now();
@@ -637,8 +647,8 @@
     var budget = (existing && existing.budget) || '';
     var bidType = (existing && existing.bid_type) || 'CPC';
     var bidAmt = (existing && existing.bid_amount) || '';
-    var startDate = (existing && existing.start_date) || '';
-    var endDate = (existing && existing.end_date) || '';
+    var startDate = toDateInputValue(existing && existing.start_date);
+    var endDate = toDateInputValue(existing && existing.end_date);
     var cats = (existing && existing.target_categories) || [];
     var occasions = (existing && existing.target_occasions) || [];
     var styles = (existing && existing.target_styles) || [];

@@ -213,3 +213,61 @@ def _event_description(event_type: str) -> str:
         "vton_try_on": "Virtual try-on completed",
     }
     return descriptions.get(event_type, f"Event: {event_type}")
+
+
+def handle_network_partners(brand_id: str) -> dict:
+    """Return compatible partner brands for the Partner Brands page."""
+    try:
+        # Get all brands except self
+        brands = _sb_get("/rest/v1/brands?select=id,name,logo_url,category,price_range,style&is_active=eq.true")
+        if not isinstance(brands, list):
+            brands = []
+
+        partners = []
+        for b in brands:
+            if b.get("id") == brand_id:
+                continue
+            partners.append({
+                "brand_id": b.get("id"),
+                "name": b.get("name", "Unknown"),
+                "logo": b.get("logo_url", ""),
+                "category": b.get("category", "Fashion"),
+                "price_range": b.get("price_range", ""),
+                "style": b.get("style", ""),
+                "compatibility": "Compatible",
+                "accepts": [],
+                "vton_views": 0,
+                "clicks": 0,
+                "sales": 0,
+                "gmv": 0
+            })
+
+        # Get network events for stats
+        events = _sb_get(f"/rest/v1/network_events?select=event_type,product_brand_id&host_brand_id=eq.{brand_id}")
+        if not isinstance(events, list):
+            events = []
+
+        # Get host preferences for partner stats
+        prefs = _sb_get(f"/rest/v1/host_preferences?brand_id=eq.{brand_id}", single=True)
+        if not isinstance(prefs, dict):
+            prefs = {}
+
+        # Enrich partners with event stats
+        for p in partners:
+            pid = p["brand_id"]
+            brand_events = [e for e in events if e.get("product_brand_id") == pid]
+            p["vton_views"] = len([e for e in brand_events if e.get("event_type") in ("vton_try_on", "impression")])
+            p["clicks"] = len([e for e in brand_events if e.get("event_type") == "click"])
+            p["sales"] = len([e for e in brand_events if e.get("event_type") == "purchase"])
+            p["gmv"] = p["sales"] * 2500  # rough avg
+
+        return {
+            "partners": partners[:50],
+            "stats": {
+                "pairings": sum(1 for p in partners if p["vton_views"] > 0),
+                "vton_appearances": sum(p["vton_views"] for p in partners),
+                "attributed_gmv": sum(p["gmv"] for p in partners)
+            }
+        }
+    except Exception as e:
+        return {"partners": [], "stats": {}, "error": str(e)}
