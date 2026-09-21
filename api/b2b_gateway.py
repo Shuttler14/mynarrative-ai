@@ -292,6 +292,23 @@ class handler(BaseHTTPRequestHandler):
                     return
                 self._respond(200, save_address(body))
 
+            # ── Public: Recommend (customer-facing widget, no API key) ──
+            elif path == "/api/recommend":
+                if not self._rate_limit_check("recommend"):
+                    return
+                body = sanitize_body(body, allowed_fields={
+                    "user_id", "session_token", "occasion", "price_tier",
+                    "include_closet", "outfit_count", "brand_id", "user_id",
+                    "price_range_min", "price_range_max", "gender", "style",
+                    "vibe", "skin_tone", "body_shape", "anchor_item",
+                    "user_context", "currency", "user_image",
+                    "brand_name",
+                })
+                body["brand_id"] = body.get("brand_id", "")
+                body["user_id"] = body.get("user_id", "")
+                result = handle_recommend(body)
+                self._respond(200, result)
+
             # ── Authenticated endpoints ────────────────────────────────
             else:
                 if not self._rate_limit_check("recommend"):
@@ -361,21 +378,6 @@ class handler(BaseHTTPRequestHandler):
 
                 elif path == "/api/closet/items":
                     result = handle_closet_items(user_id, self.headers.get("Query", ""))
-                    self._respond(200, result)
-
-                elif path == "/api/recommend":
-                    if not self._rate_limit_check("recommend"):
-                        return
-                    body = sanitize_body(body, allowed_fields={
-                        "user_id", "session_token", "occasion", "price_tier",
-                        "include_closet", "outfit_count", "brand_id", "user_id",
-                        "price_range_min", "price_range_max", "gender", "style",
-                        "vibe", "skin_tone", "body_shape", "anchor_item",
-                        "user_context", "currency", "user_image",
-                    })
-                    body["brand_id"] = brand_id
-                    body["user_id"] = user_id
-                    result = handle_recommend(body)
                     self._respond(200, result)
 
                 # ── Sponsored Campaign Endpoints ──────────────────────
