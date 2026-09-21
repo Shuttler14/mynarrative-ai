@@ -80,8 +80,10 @@ def _gen_order_number():
 # ============================================
 
 def get_cart(query):
-    user_id = query.get('user_id', [None])[0]
-    session_id = query.get('session_id', [None])[0]
+    uid_vals = query.get('user_id', [])
+    sid_vals = query.get('session_id', [])
+    user_id = uid_vals[0] if uid_vals else None
+    session_id = sid_vals[0] if sid_vals else None
     if not user_id and not session_id:
         return {'items': [], 'total': 0, 'item_count': 0, 'brands': [], 'brand_count': 0}
 
@@ -222,7 +224,8 @@ def clear_cart(body):
 # ============================================
 
 def get_addresses(query):
-    user_id = query.get('user_id', [None])[0]
+    uid_vals = query.get('user_id', [])
+    user_id = uid_vals[0] if uid_vals else None
     if not user_id:
         return {'error': 'user_id required'}, 400
     addrs = _sb('narrative_addresses', query=f'user_id=eq.{user_id}&order=is_default.desc')
@@ -261,7 +264,8 @@ def save_address(body):
 # ============================================
 
 def get_orders(query):
-    user_id = query.get('user_id', [None])[0]
+    uid_vals = query.get('user_id', [])
+    user_id = uid_vals[0] if uid_vals else None
     if not user_id:
         return {'error': 'user_id required'}, 400
     orders = _sb('narrative_orders', query=f'user_id=eq.{user_id}&order=created_at.desc')

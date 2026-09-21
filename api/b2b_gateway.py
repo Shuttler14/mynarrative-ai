@@ -216,8 +216,7 @@ class handler(BaseHTTPRequestHandler):
                     self._respond(404, {"error": "not_found"})
 
         except Exception as e:
-            import traceback
-            self._respond(500, {"error": sanitize_error(e), "trace": traceback.format_exc()[-800:]})
+            self._respond(500, {"error": sanitize_error(e)})
 
     def do_POST(self):
         try:
@@ -496,8 +495,7 @@ class handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._respond(400, {"error": "invalid_json"})
         except Exception as e:
-            import traceback
-            self._respond(500, {"error": sanitize_error(e), "trace": traceback.format_exc()[-800:]})
+            self._respond(500, {"error": sanitize_error(e)})
 
     def log_message(self, format, *args):
         pass
