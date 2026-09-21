@@ -1,4 +1,24 @@
 {
+  "outputDirectory": ".vercel/output",
+  "functions": {
+    "api/b2b_gateway.py": {
+      "maxDuration": 60,
+      "memory": 512
+    },
+    "api/brand_search_api.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/syndicate/gateway.py": {
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "api/fashion_services.py": {
+      "maxDuration": 60,
+      "memory": 512,
+      "includeFiles": "api/**"
+    }
+  },
   "rewrites": [
     { "source": "/api/cart",           "destination": "/api/b2b_gateway" },
     { "source": "/api/cart/add",       "destination": "/api/b2b_gateway" },
@@ -15,6 +35,7 @@
     { "source": "/api/widget/:path*",  "destination": "/api/b2b_gateway" },
     { "source": "/api/user/:path*",    "destination": "/api/b2b_gateway" },
     { "source": "/api/closet/:path*",  "destination": "/api/b2b_gateway" },
+    { "source": "/api/recommend",      "destination": "/api/b2b_gateway" },
     { "source": "/api/recommend/:path*","destination": "/api/b2b_gateway" },
     { "source": "/api/sponsored/:path*","destination": "/api/b2b_gateway" },
     { "source": "/api/network/:path*","destination": "/api/b2b_gateway" },
@@ -25,6 +46,9 @@
     { "source": "/api/creator/:path*", "destination": "/api/creator_economy" },
     { "source": "/api/image/:path*",   "destination": "/api/image_services" },
     { "source": "/api/fashion/:path*", "destination": "/api/fashion_services" },
-    { "source": "/api/syndicate/:path*","destination": "/api/syndicate/gateway" }
+    { "source": "/api/syndicate/:path*","destination": "/api/syndicate/gateway" },
+    { "source": "/api/brand/search",   "destination": "/api/brand_search_api" },
+    { "source": "/api/brand/search-for-occasion","destination": "/api/brand_search_api" },
+    { "source": "/api/brand/catalogs", "destination": "/api/brand_search_api" }
   ]
 }
