@@ -39,8 +39,7 @@ from api.dashboard import (
     handle_dashboard_wallet, handle_network_partners,
 )
 from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
-from api.checkout import (
-    handle_cart, handle_checkout,
+from api.checkout_api import (
     get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
     create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
 )
