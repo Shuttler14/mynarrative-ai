@@ -100,7 +100,7 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(403, {"error": "forbidden"})
                 return
 
-            # ── Public GET endpoints ──────────────────────────────────────
+            # ── Public GET endpoints (no auth) ────────────────────────
             if path == "/api/health":
                 if not self._rate_limit_check("default"):
                     return
@@ -110,6 +110,27 @@ class handler(BaseHTTPRequestHandler):
                 if not self._rate_limit_check("default"):
                     return
                 self._respond(200, handle_pricing_tiers())
+
+            elif path == "/api/cart":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_cart(query))
+
+            elif path == "/api/checkout/address":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_addresses(query))
+
+            elif path == "/api/orders":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, get_orders(query))
+
+            elif path.startswith("/api/orders/"):
+                if not self._rate_limit_check("default"):
+                    return
+                order_id = path.split("/")[-1]
+                self._respond(200, get_order_detail(order_id))
 
             # ── Authenticated GET endpoints ───────────────────────────────
             else:
@@ -160,7 +181,6 @@ class handler(BaseHTTPRequestHandler):
                     except Exception as e:
                         self._respond(500, {"error": str(e)})
 
-                # ── Dashboard Endpoints ────────────────────────────────
                 elif path == "/api/dashboard/overview":
                     if not self._rate_limit_check("default"):
                         return
@@ -194,31 +214,6 @@ class handler(BaseHTTPRequestHandler):
 
                 else:
                     self._respond(404, {"error": "not_found"})
-
-            # ── Public: Cart & Checkout (user_id based, no API key) ──
-            elif path == "/api/cart":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, get_cart(query))
-
-            elif path == "/api/checkout/address":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, get_addresses(query))
-
-            elif path == "/api/orders":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, get_orders(query))
-
-            elif path.startswith("/api/orders/"):
-                if not self._rate_limit_check("default"):
-                    return
-                order_id = path.split("/")[-1]
-                self._respond(200, get_order_detail(order_id))
-
-            else:
-                self._respond(404, {"error": "not_found"})
 
         except Exception as e:
             self._respond(500, {"error": sanitize_error(e)})
@@ -260,6 +255,42 @@ class handler(BaseHTTPRequestHandler):
                 if not self._rate_limit_check("default"):
                     return
                 self._respond(200, handle_health())
+
+            # ── Public: Cart & Checkout POST (user_id based) ────────
+            elif path == "/api/cart/add":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, add_to_cart(body))
+
+            elif path == "/api/cart/update":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, update_cart_item(body))
+
+            elif path == "/api/cart/remove":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, remove_from_cart({'item_id': [body.get('item_id')]}))
+
+            elif path == "/api/cart/clear":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, clear_cart({'user_id': [body.get('user_id')]}))
+
+            elif path == "/api/checkout/create":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, create_order(body))
+
+            elif path == "/api/checkout/verify":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, verify_payment(body))
+
+            elif path == "/api/checkout/address":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, save_address(body))
 
             # ── Authenticated endpoints ────────────────────────────────
             else:
@@ -460,42 +491,6 @@ class handler(BaseHTTPRequestHandler):
 
                 else:
                     self._respond(404, {"error": "not_found"})
-
-            # ── Public: Cart & Checkout POST (user_id based) ────────
-            elif path == "/api/cart/add":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, add_to_cart(body))
-
-            elif path == "/api/cart/update":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, update_cart_item(body))
-
-            elif path == "/api/cart/remove":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, remove_from_cart({'item_id': [body.get('item_id')]}))
-
-            elif path == "/api/cart/clear":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, clear_cart({'user_id': [body.get('user_id')]}))
-
-            elif path == "/api/checkout/create":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, create_order(body))
-
-            elif path == "/api/checkout/verify":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, verify_payment(body))
-
-            elif path == "/api/checkout/address":
-                if not self._rate_limit_check("default"):
-                    return
-                self._respond(200, save_address(body))
 
         except json.JSONDecodeError:
             self._respond(400, {"error": "invalid_json"})
