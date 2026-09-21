@@ -1,24 +1,4 @@
 {
-  "outputDirectory": ".vercel/output",
-  "functions": {
-    "api/b2b_gateway.py": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/brand_search_api.py": {
-      "maxDuration": 30,
-      "memory": 256
-    },
-    "api/syndicate/gateway.py": {
-      "maxDuration": 30,
-      "memory": 256
-    },
-    "api/fashion_services.py": {
-      "maxDuration": 60,
-      "memory": 512,
-      "includeFiles": "api/**"
-    }
-  },
   "rewrites": [
     { "source": "/api/cart",           "destination": "/api/b2b_gateway" },
     { "source": "/api/cart/add",       "destination": "/api/b2b_gateway" },
