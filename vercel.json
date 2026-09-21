@@ -1,1 +1,10 @@
-{}
+{
+  "functions": {
+    "api/b2b_gateway.py": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/b2b_gateway" }
+  ]
+}
