@@ -43,7 +43,11 @@ def _sb_query(table: str, filters: dict, select: str = "*", limit: int = 200) ->
     }
     try:
         resp = requests.get(url, headers=headers, timeout=10)
-        return resp.json() if resp.text else []
+        data = resp.json() if resp.text else []
+        if isinstance(data, dict):
+            # Supabase error response — treat as empty
+            return []
+        return data
     except Exception:
         return []
 
