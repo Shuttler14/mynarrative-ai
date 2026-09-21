@@ -196,8 +196,8 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     self._respond(404, {"error": "not_found"})
 
-            # ── Cart & Checkout (public, user_id based) ──────────────
-            if path == "/api/cart":
+            # ── Public: Cart & Checkout (user_id based, no API key) ──
+            elif path == "/api/cart":
                 if not self._rate_limit_check("default"):
                     return
                 self._respond(200, get_cart(query))
@@ -217,6 +217,9 @@ class handler(BaseHTTPRequestHandler):
                     return
                 order_id = path.split("/")[-1]
                 self._respond(200, get_order_detail(order_id))
+
+            else:
+                self._respond(404, {"error": "not_found"})
 
         except Exception as e:
             self._respond(500, {"error": sanitize_error(e)})
@@ -459,8 +462,8 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     self._respond(404, {"error": "not_found"})
 
-            # ── Cart & Checkout POST (public, user_id based) ─────────
-            if path == "/api/cart/add":
+            # ── Public: Cart & Checkout POST (user_id based) ────────
+            elif path == "/api/cart/add":
                 if not self._rate_limit_check("default"):
                     return
                 self._respond(200, add_to_cart(body))
