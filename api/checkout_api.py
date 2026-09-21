@@ -42,7 +42,7 @@ def _sb(table, method='GET', data=None, query=None):
                 _db_available[table] = True
         except Exception as e:
             err = str(e).lower()
-            if 'does not exist' in err or 'relation' in err or '404' in err:
+            if 'does not exist' in err or 'relation' in err or '404' in err or 'pgrst205' in err or 'could not find' in err or 'not found' in err:
                 _db_available[table] = False
             else:
                 _db_available[table] = True
@@ -124,7 +124,7 @@ def add_to_cart(body):
 
     db_result = _sb('narrative_cart', query=f'product_id=eq.{product["product_id"]}&user_id=eq.{user_id}') if user_id else None
 
-    if db_result is not None:
+    if db_result is not None and not (isinstance(db_result, dict) and 'error' in db_result):
         if isinstance(db_result, list) and len(db_result) > 0:
             existing = db_result[0]
             new_qty = existing['quantity'] + quantity
