@@ -25,9 +25,11 @@ def _sb_get(url: str, single: bool = False):
 def handle_dashboard_overview(brand_id: str) -> dict:
     """Return dashboard overview: stats, recent activity, network status."""
     try:
-        brand = _sb_get(f"/rest/v1/brands?id=eq.{brand_id}&select=name,widget_config,network_mode", single=True)
+        brand = _sb_get(f"/rest/v1/brands?id=eq.{brand_id}&select=name,widget_config", single=True)
         brand_name = brand.get("name", "Brand") if isinstance(brand, dict) else "Brand"
-        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_name}&select=id")
+        from urllib.parse import quote
+        brand_encoded = quote(brand_name, safe="")
+        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_encoded}&select=id")
         product_count = len(products)
 
         campaigns = _sb_get(f"/rest/v1/sponsored_campaigns?brand_id=eq.{brand_id}&select=id,status,budget_spent,impressions,clicks,conversions")
@@ -47,6 +49,7 @@ def handle_dashboard_overview(brand_id: str) -> dict:
 
         activity = [{"type": e.get("event_type", ""), "date": e.get("created_at", ""), "description": _event_description(e.get("event_type", ""))} for e in events[:10]]
 
+        s = settings if isinstance(settings, dict) else {}
         return {
             "success": True,
             "brand_name": brand_name,
@@ -62,10 +65,10 @@ def handle_dashboard_overview(brand_id: str) -> dict:
                 "total_products": product_count,
             },
             "network_status": {
-                "vton_enabled": settings.get("vton_enabled", True) if isinstance(settings, dict) else True,
-                "receive_recommendations": settings.get("receive_recommendations", True) if isinstance(settings, dict) else True,
-                "distribute_products": settings.get("distribute_products", False) if isinstance(settings, dict) else False,
-                "promote_products": settings.get("promote_products", False) if isinstance(settings, dict) else False,
+                "vton_enabled": True,
+                "receive_recommendations": True,
+                "distribute_products": s.get("network_mode", "") in ("curated_network", "open_network"),
+                "promote_products": s.get("show_network_badge", False),
             },
             "activity": activity,
             "campaigns": [{"id": c.get("id"), "name": c.get("name", "Campaign"), "status": c.get("status"), "spent": c.get("budget_spent", 0), "impressions": c.get("impressions", 0), "clicks": c.get("clicks", 0)} for c in active_campaigns[:5]],
@@ -79,7 +82,9 @@ def handle_dashboard_products(brand_id: str) -> dict:
     try:
         brand = _sb_get(f"/rest/v1/brands?id=eq.{brand_id}&select=name", single=True)
         brand_name = brand.get("name", "") if isinstance(brand, dict) else ""
-        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_name}&select=*&order=created_at.desc")
+        from urllib.parse import quote
+        brand_encoded = quote(brand_name, safe="")
+        products = _sb_get(f"/rest/v1/brand_products?brand=eq.{brand_encoded}&select=*&order=created_at.desc")
         return {
             "success": True,
             "products": [{"id": p.get("id"), "title": p.get("title", ""), "price": p.get("price", 0), "category": p.get("category", ""), "image_url": p.get("image_url", ""), "product_url": p.get("product_url", ""), "eligible": p.get("eligible", True), "stock": p.get("stock", "in_stock"), "created_at": p.get("created_at", "")} for p in products],
@@ -105,17 +110,22 @@ def handle_dashboard_network_settings(brand_id: str, update: dict = None) -> dic
         rules = _sb_get(f"/rest/v1/host_category_rules?host_brand_id=eq.{brand_id}&select=*")
         exclusions = _sb_get(f"/rest/v1/brand_exclusions?host_brand_id=eq.{brand_id}&select=*")
 
+        s = settings if isinstance(settings, dict) else {}
         return {
             "success": True,
-            "vton_enabled": settings.get("vton_enabled", True) if isinstance(settings, dict) else True,
-            "receive_recommendations": settings.get("receive_recommendations", True) if isinstance(settings, dict) else True,
-            "distribute_products": settings.get("distribute_products", False) if isinstance(settings, dict) else False,
-            "promote_products": settings.get("promote_products", False) if isinstance(settings, dict) else False,
-            "promotion_budget": settings.get("promotion_budget", 0) if isinstance(settings, dict) else 0,
-            "max_cpc_bid": settings.get("max_cpc_bid", 0) if isinstance(settings, dict) else 0,
-            "cross_brand_density": settings.get("cross_brand_density", 0.3) if isinstance(settings, dict) else 0.3,
+            "vton_enabled": True,
+            "receive_recommendations": True,
+            "distribute_products": s.get("network_mode", "") in ("curated_network", "open_network"),
+            "promote_products": s.get("show_network_badge", False),
+            "promotion_budget": 0,
+            "max_cpc_bid": 0,
+            "cross_brand_density": s.get("cross_brand_density", "balanced"),
             "category_rules": rules,
             "competitor_exclusions": exclusions,
+            "network_mode": s.get("network_mode", "curated_network"),
+            "allowed_positionings": s.get("allowed_positionings", []),
+            "competitor_policy": s.get("competitor_policy", "never_show"),
+            "price_tolerance_pct": s.get("price_tolerance_pct", 0.5),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
