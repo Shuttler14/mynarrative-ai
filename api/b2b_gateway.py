@@ -53,9 +53,8 @@ from api.attribution import (
     batch_advance_pending_commissions, batch_advance_confirmed_to_payable,
 )
 
-# Auth/Profile (inline to avoid proxy issues)
-import hashlib, time as _time, secrets as _secrets
-_AUTH_OTP_TTL = 300
+# Auth/Profile — Shopify Customer Accounts (no custom auth needed)
+import hashlib, time as _time
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
@@ -95,122 +94,13 @@ class handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    # ── Auth Helpers (inline) ──────────────────────────────────────────
-    def _auth_generate_otp(self):
-        return f"{_secrets.randbelow(900000) + 100000}"
-
-    def _auth_create_token(self, user_id, email):
-        payload = f"{user_id}:{email}:{int(_time.time())}"
-        sig = hashlib.sha256(f"{payload}:mn_secret".encode()).hexdigest()[:16]
-        return f"{payload}:{sig}"
-
-    def _auth_verify_token(self, token):
-        try:
-            parts = token.split(":")
-            if len(parts) != 4:
-                return None
-            user_id, email, ts, sig = parts
-            expected = hashlib.sha256(f"{user_id}:{email}:{ts}:mn_secret".encode()).hexdigest()[:16]
-            if sig != expected:
-                return None
-            if int(_time.time()) - int(ts) > 86400 * 30:
-                return None
-            return user_id
-        except Exception:
+    # ── Shopify Customer ID helper ────────────────────────────────────
+    def _get_shopify_uid(self):
+        """Extract user ID from X-Shopify-Customer-Id header."""
+        cid = self.headers.get("X-Shopify-Customer-Id", "").strip()
+        if not cid or cid == "guest" or cid == "null":
             return None
-
-    def _auth_send_otp(self, body):
-        email = (body.get("email") or "").strip().lower()
-        if not email or "@" not in email:
-            self._respond(400, {"error": "Valid email required"})
-            return
-        otp = self._auth_generate_otp()
-        expires_at = _time.time() + _AUTH_OTP_TTL
-        from datetime import datetime, timezone
-        expires_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
-        # Store OTP in Supabase (persistent across Lambda instances)
-        try:
-            sb_request("POST", "/rest/v1/mn_otp_codes", {
-                "email": email, "otp_code": otp,
-                "expires_at": expires_iso, "is_used": False
-            })
-        except Exception as e:
-            print(f"[AUTH] OTP store failed: {e}")
-        print(f"[AUTH] OTP for {email}: {otp}")
-        try:
-            users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
-            is_new = len(users) == 0
-        except Exception:
-            is_new = True
-        self._respond(200, {"ok": True, "is_new_user": is_new})
-
-    def _auth_verify_otp(self, body):
-        email = (body.get("email") or "").strip().lower()
-        otp = (body.get("otp") or "").strip()
-        if not email or not otp:
-            self._respond(400, {"error": "Email and OTP required"})
-            return
-        # Verify against Supabase
-        try:
-            rows = sb_request("GET",
-                f"/rest/v1/mn_otp_codes?email=eq.{email}&is_used=eq.false&order=created_at.desc&limit=1")
-        except Exception as e:
-            self._respond(500, {"error": f"OTP lookup failed: {e}"})
-            return
-        if not rows:
-            self._respond(400, {"error": "No code requested. Send a new one."})
-            return
-        stored = rows[0]
-        from datetime import datetime, timezone
-        exp = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
-        if datetime.now(tz=timezone.utc) > exp:
-            self._respond(400, {"error": "Code expired. Send a new one."})
-            return
-        if stored["otp_code"] != otp:
-            self._respond(400, {"error": "Wrong code."})
-            return
-        # Mark OTP used
-        try:
-            sb_request("PATCH", f"/rest/v1/mn_otp_codes?id=eq.{stored['id']}", {"is_used": True})
-        except Exception:
-            pass
-        user_id = f"mn_{hashlib.sha256(email.encode()).hexdigest()[:16]}"
-        try:
-            users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
-            if users:
-                user_id = users[0]["user_id"]
-                is_new = False
-            else:
-                sb_request("POST", "/rest/v1/mn_user_profiles", {"user_id": user_id, "email": email})
-                is_new = True
-        except Exception:
-            is_new = True
-        token = self._auth_create_token(user_id, email)
-        self._respond(200, {"ok": True, "token": token, "user_id": user_id, "email": email, "is_new_user": is_new})
-
-    def _auth_complete_profile(self, body):
-        email = (body.get("email") or "").strip().lower()
-        name = (body.get("name") or "").strip()
-        gender = (body.get("gender") or "").strip()
-        if not email:
-            self._respond(400, {"error": "Email required"})
-            return
-        user_id = f"mn_{hashlib.sha256(email.encode()).hexdigest()[:16]}"
-        updates = {}
-        if name:
-            updates["display_name"] = name
-        if gender:
-            updates["gender"] = gender
-        if updates:
-            try:
-                sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{user_id}", updates)
-            except Exception:
-                try:
-                    sb_request("POST", "/rest/v1/mn_user_profiles", {"user_id": user_id, "email": email, **updates})
-                except Exception:
-                    pass
-        token = self._auth_create_token(user_id, email)
-        self._respond(200, {"ok": True, "token": token, "user_id": user_id, "email": email, "display_name": name, "gender": gender})
+        return f"shopify_{cid}"
 
     # ── User Profile Handlers ──────────────────────────────────────────
     def _handle_user_profile(self, uid):
@@ -329,6 +219,29 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._respond(500, {"error": str(e)})
 
+    def _sync_user_profile(self, uid, body):
+        """Ensure user profile exists in Supabase, update with Shopify data."""
+        email = body.get("email", "")
+        name = body.get("name", "")
+        gender = body.get("gender", "")
+        try:
+            existing = sb_request("GET", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}&select=user_id")
+            updates = {}
+            if email:
+                updates["email"] = email
+            if name:
+                updates["display_name"] = name
+            if gender:
+                updates["gender"] = gender
+            updates["last_active_at"] = "now()"
+            if existing:
+                sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}", updates)
+            else:
+                sb_request("POST", "/rest/v1/mn_user_profiles", {"user_id": uid, **updates})
+            self._respond(200, {"ok": True})
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors_headers(self.headers.get("Origin", ""))
@@ -399,23 +312,9 @@ class handler(BaseHTTPRequestHandler):
                 order_id = path.split("/")[-1]
                 self._respond(200, get_order_detail(order_id))
 
-            # ── User Auth & Profile GET (no API key) ─────────────────
-            elif path.startswith("/api/auth/me"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
-                if not uid:
-                    self._respond(401, {"error": "Invalid session"})
-                else:
-                    try:
-                        users = sb_request("GET", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}&select=*")
-                        user = users[0] if users else {"user_id": uid}
-                        self._respond(200, user)
-                    except Exception:
-                        self._respond(200, {"user_id": uid})
-
+            # ── User Profile GET (Shopify customer auth) ──────────────
             elif path.startswith("/api/user/"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                 elif path == "/api/user/profile":
@@ -530,31 +429,9 @@ class handler(BaseHTTPRequestHandler):
 
             content_length = int(self.headers.get("Content-Length", 0))
 
-            # ── User Auth & Profile POST ──────────────────────────────
-            if path.startswith("/api/auth/send-otp"):
-                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
-                self._auth_send_otp(body)
-                return
-            elif path.startswith("/api/auth/verify-otp"):
-                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
-                self._auth_verify_otp(body)
-                return
-            elif path.startswith("/api/auth/complete-profile"):
-                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
-                self._auth_complete_profile(body)
-                return
-            elif path.startswith("/api/auth/session"):
-                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
-                token = body.get("token", "")
-                uid = self._auth_verify_token(token)
-                if not uid:
-                    self._respond(401, {"error": "Invalid session"})
-                else:
-                    self._respond(200, {"user_id": uid})
-                return
-            elif path.startswith("/api/user/profile"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+            # ── User Profile POST (Shopify customer auth) ─────────────
+            if path.startswith("/api/user/profile"):
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                 else:
@@ -562,8 +439,7 @@ class handler(BaseHTTPRequestHandler):
                     self._update_user_profile(uid, body)
                 return
             elif path.startswith("/api/user/cards"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                 else:
@@ -571,8 +447,7 @@ class handler(BaseHTTPRequestHandler):
                     self._add_user_card(uid, body)
                 return
             elif path.startswith("/api/user/persons"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                 else:
@@ -580,13 +455,20 @@ class handler(BaseHTTPRequestHandler):
                     self._add_user_person(uid, body)
                 return
             elif path.startswith("/api/user/outfits"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                 else:
                     body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
                     self._save_user_outfit(uid, body)
+                return
+            elif path.startswith("/api/user/sync"):
+                uid = self._get_shopify_uid()
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._sync_user_profile(uid, body)
                 return
 
             if content_length > 512000:
