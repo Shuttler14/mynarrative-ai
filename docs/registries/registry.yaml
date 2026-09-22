@@ -1,0 +1,1120 @@
+# ============================================================
+# MY NARRATIVE COMMERCE NETWORK — MASTER ENTITY REGISTRY
+# Version: 1.0.0
+# Generated: 2026-09-22
+# ============================================================
+
+metadata:
+  project_name: "My Narrative Commerce Network"
+  version: "1.0.0"
+  generated: "2026-09-22"
+  total_entities: 97
+
+# ============================================================
+# SYSTEMS (SYS)
+# ============================================================
+systems:
+  - id: SYS-001
+    name: "B2B Recommendation Engine"
+    type: system
+    repository: mynarrative-ai
+    path: api/recommend/
+    description: "AI-powered cross-brand fashion recommendation engine with 12-stage pipeline"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-001, INT-002, INT-004, DB-001, DB-002]
+
+  - id: SYS-002
+    name: "Virtual Try-On Pipeline"
+    type: system
+    repository: drishti
+    path: api/services/vton_replicate.py, api/routers/vton.py
+    description: "VTON pipeline using Replicate API with face preservation"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-003, INT-005, DB-009]
+
+  - id: SYS-003
+    name: "Brand Dashboard"
+    type: system
+    repository: mynarrative-ai
+    path: api/dashboard/, assets/brand-dashboard.js
+    description: "B2B brand dashboard with analytics, products, campaigns, partners, wallet"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [SYS-001, DB-001, DB-006]
+
+  - id: SYS-004
+    name: "Checkout System"
+    type: system
+    repository: mynarrative-ai
+    path: api/checkout_api.py
+    description: "Unified cross-brand shopping cart, order creation, commission calculation"
+    status: active
+    maturity: beta
+    owner: engineering
+    dependencies: [DB-012, DB-013, DB-014, DB-015]
+    notes: "Currently uses in-memory fallback; Supabase schema not deployed"
+
+  - id: SYS-005
+    name: "Creator Economy Platform"
+    type: system
+    repository: mynarrative-ai
+    path: api/creator_economy.py, creator-economy-api/
+    description: "Creator registration, tiers, commissions, design publishing, print-on-demand"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [DB-008, INT-006, INT-007]
+
+  - id: SYS-006
+    name: "Price Comparison Aggregator"
+    type: system
+    repository: drishti
+    path: api/services/price_scraper.py
+    description: "Cross-platform price comparison across Amazon, Flipkart, Myntra, AJIO, Nykaa"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-008, INT-009, DB-010]
+
+  - id: SYS-007
+    name: "Marketplace Recommendation Service"
+    type: system
+    repository: drishti
+    path: api/services/marketplace_reco.py
+    description: "Marketplace-first recommendations via Google Shopping + direct scrapers"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-008, SYS-011]
+
+  - id: SYS-008
+    name: "Fashion Intelligence Engine"
+    type: system
+    repository: drishti
+    path: api/services/fashion_engine.py
+    description: "Deterministic lexicon-based fashion scoring (no LLM in hot path)"
+    status: active
+    maturity: production
+    owner: engineering
+
+  - id: SYS-009
+    name: "User Auth & Identity System"
+    type: system
+    repository: drishti
+    path: api/routers/user.py
+    description: "OTP-based auth with JWT tokens, user profiles, body/style profiles"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [DB-004]
+
+  - id: SYS-010
+    name: "Catalog Sync Service"
+    type: system
+    repository: drishti
+    path: api/services/catalog_sync.py, services/shopify-sync-svc/
+    description: "Shopify → Qdrant vector catalog sync with embeddings"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-006, INT-011, DB-006]
+
+  - id: SYS-011
+    name: "Knowledge Graph (Fashion Rules)"
+    type: system
+    repository: mynarrative-ai
+    path: api/recommend/knowledge_graph.py
+    description: "906-line rules engine for color theory, occasion, body shape, patterns, materials"
+    status: active
+    maturity: production
+    owner: engineering
+
+  - id: SYS-012
+    name: "Sponsored Campaigns System"
+    type: system
+    repository: mynarrative-ai
+    path: api/recommend/cross_ranking.py, api/recommend/eligibility.py
+    description: "Two-stage ranking: organic score + capped sponsored boost (max 15%)"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [DB-006]
+
+  - id: SYS-013
+    name: "AI Stylist Wizard"
+    type: system
+    repository: shopify-theme
+    path: assets/MN-stylist-wizard-v4.js
+    description: "Floating widget for customer-facing outfit recommendations + VTON"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [SYS-001, SYS-002]
+
+  - id: SYS-014
+    name: "Observability Stack"
+    type: system
+    repository: drishti
+    path: libs/py-observability/
+    description: "Sentry + Prometheus + OpenTelemetry + structlog"
+    status: active
+    maturity: production
+    owner: engineering
+
+  - id: SYS-015
+    name: "GPU VTOE Pipeline"
+    type: system
+    repository: drishti
+    path: vtoe/
+    description: "Full 5-stage GPU pipeline: person detect → garment segment → VTON → post-process → quality score"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-003, INT-010, INT-012]
+
+  - id: SYS-016
+    name: "Modal VTON Worker"
+    type: system
+    repository: drishti
+    path: modal_vton/
+    description: "CatVTON Mask-Free VTON on Modal serverless GPU (T4)"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-013]
+
+  - id: SYS-017
+    name: "Admin System"
+    type: system
+    repository: drishti
+    path: api/routers/admin.py, services/admin-svc/
+    description: "Admin dashboard, catalog sync, user management, analytics"
+    status: active
+    maturity: production
+    owner: engineering
+
+  - id: SYS-018
+    name: "Body & Style Analysis"
+    type: system
+    repository: drishti
+    path: api/routers/analysis.py
+    description: "Body measurement, style, and color analysis via Replicate + OpenAI"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-003, INT-001]
+
+  - id: SYS-019
+    name: "Card Offers Database"
+    type: system
+    repository: drishti
+    path: api/services/card_offers.py
+    description: "Static bank card offer database (HDFC, ICICI, SBI, Axis, etc.)"
+    status: active
+    maturity: production
+    owner: engineering
+
+  - id: SYS-020
+    name: "Weather-Based Recommendations"
+    type: system
+    repository: drishti
+    path: api/routers/weather.py
+    description: "Weather-aware styling suggestions via OpenWeatherMap API"
+    status: active
+    maturity: production
+    owner: engineering
+    dependencies: [INT-014]
+
+# ============================================================
+# FEATURES (FEAT)
+# ============================================================
+features:
+  - id: FEAT-001
+    name: "Cross-Brand Recommendation Ranking"
+    feature: SYS-001
+    description: "7-factor scoring with eligibility gate, organic ranking, and sponsored boost"
+    factors:
+      - kg_compatibility: 0.25
+      - vector_similarity: 0.20
+      - style_cohesion: 0.15
+      - color_harmony: 0.10
+      - attribute_match: 0.10
+      - quality_rating: 0.10
+      - price_fit: 0.10
+
+  - id: FEAT-002
+    name: "Multi-Armed Bandit Exploration"
+    feature: SYS-001
+    description: "18% epsilon-greedy exploration for brand fairness in recommendations"
+    rate: "18%"
+
+  - id: FEAT-003
+    name: "Three B2B Network Modes"
+    feature: SYS-001
+    modes:
+      - id: A
+        name: "Brand Only"
+        description: "Host sells own products only"
+      - id: B
+        name: "Curated Network"
+        description: "Default mode, host picks partner brands"
+      - id: C
+        name: "Open Network"
+        description: "Anyone can sell through host's widget"
+
+  - id: FEAT-004
+    name: "Brand DNA Profiling"
+    feature: SYS-001
+    description: "Computed brand profile with style vectors, price positioning, demographics"
+
+  - id: FEAT-005
+    name: "Product DNA Embeddings"
+    feature: SYS-001
+    description: "1536-dim OpenAI text-embedding-3-small + Fashion-CLIP image embeddings"
+
+  - id: FEAT-006
+    name: "Virtual Try-On (Single Garment)"
+    feature: SYS-002
+    description: "One garment on person image with face preservation"
+
+  - id: FEAT-007
+    name: "Virtual Try-On (Full Look)"
+    feature: SYS-002
+    description: "Up to 4 garments simultaneously on person"
+
+  - id: FEAT-008
+    name: "Garment Extraction from Marketplace Photos"
+    feature: SYS-002
+    description: "rembg background removal + PIL cleanup + white background"
+
+  - id: FEAT-009
+    name: "Ethnic Wear Classification"
+    feature: SYS-015
+    description: "CLIP-based classifier for 7 Indian garment types with LoRA registry"
+
+  - id: FEAT-010
+    name: "Face Preservation in VTON"
+    feature: SYS-015
+    description: "InsightFace + ArcFace + CodeFormer face swap + quality verification"
+
+  - id: FEAT-011
+    name: "Brand Dashboard Analytics"
+    feature: SYS-003
+    description: "Products, orders, revenue, conversion rate, VTON saves, brand fit"
+
+  - id: FEAT-012
+    name: "Network Settings (Per Brand)"
+    feature: SYS-003
+    description: "Tab A: My Website settings, Tab B: Product Distribution rules"
+
+  - id: FEAT-013
+    name: "Campaign Management"
+    feature: SYS-003
+    description: "8-section campaign creation: Campaign, Products, Categories, Distribution, Pairing, Audience, Budget, Exclusions"
+
+  - id: FEAT-014
+    name: "Partner Brands View"
+    feature: SYS-003
+    description: "Network partners with performance table"
+
+  - id: FEAT-015
+    name: "Cross-Brand Cart"
+    feature: SYS-004
+    description: "Cart supporting products from multiple brands"
+
+  - id: FEAT-016
+    name: "Order Splitting"
+    feature: SYS-004
+    description: "Order splits into brand sub-orders for fulfillment"
+
+  - id: FEAT-017
+    name: "Commission Calculation"
+    feature: SYS-004
+    description: "Platform commission (10%) + host affiliate commission (7%)"
+
+  - id: FEAT-018
+    name: "Creator Tiers"
+    feature: SYS-005
+    description: "Bronze → Silver (50 sold) → Gold (200) → Diamond (1000)"
+
+  - id: FEAT-019
+    name: "Creator Rank System"
+    feature: SYS-005
+    description: "Rookie Designer → Emerging Talent → Trendsetter → Style Architect → Platform Icon (₹5L lifetime)"
+
+  - id: FEAT-020
+    name: "Design Publishing Pipeline"
+    feature: SYS-005
+    description: "AI design generation → slogan → gang sheet → Shopify product creation"
+
+  - id: FEAT-021
+    name: "Price Comparison Across 5 Platforms"
+    feature: SYS-006
+    description: "Amazon, Flipkart, Myntra, AJIO, Nykaa via SerpApi + direct scrapers"
+
+  - id: FEAT-022
+    name: "Price Alerts"
+    feature: SYS-006
+    description: "User-set target price notifications"
+
+  - id: FEAT-023
+    name: "Budget Intelligence"
+    feature: SYS-007
+    description: "Dynamic percentile-based price bands from live data distributions"
+
+  - id: FEAT-024
+    name: "Fashion Lexicon Scoring"
+    feature: SYS-008
+    description: "13 color families, 11 fabrics, 7 fits, 7 patterns, 13 occasions"
+
+  - id: FEAT-025
+    name: "OTP Authentication"
+    feature: SYS-009
+    description: "6-digit OTP with SHA-256 hash, 10min expiry, 5 max attempts"
+
+  - id: FEAT-026
+    name: "Shopify Product Sync"
+    feature: SYS-010
+    description: "Shopify Admin REST/GraphQL → Qdrant with fastembed (BAAI/bge-small-en-v1.5)"
+
+  - id: FEAT-027
+    name: "AI Stylist Wizard (Frontend Widget)"
+    feature: SYS-013
+    description: "Floating widget: onboarding → outfit generation → VTON → add-to-cart"
+
+  - id: FEAT-028
+    name: "Multi-Currency Support"
+    feature: SYS-004
+    currencies: [INR, USD, GBP, EUR, AED, AUD]
+    base: INR
+
+  - id: FEAT-029
+    name: "Sponsored Boost Cap"
+    feature: SYS-012
+    description: "Maximum 15% boost for sponsored products in ranking"
+
+  - id: FEAT-030
+    name: "Fashion Taxonomy System"
+    feature: SYS-001
+    description: "Men (6 categories) + Women (6 categories) with product roles and pairing rules"
+
+  - id: FEAT-031
+    name: "One-Piece Exclusion Rule"
+    feature: SYS-001
+    description: "One-Piece items cannot pair with Tops, Bottoms, Skirts, Leggings, Shorts, Jeans, Trousers"
+
+  - id: FEAT-032
+    name: "Two-Sided Permission System"
+    feature: SYS-012
+    description: "Advertiser targeting never overrides host permission"
+
+# ============================================================
+# PROJECTS (PRJ)
+# ============================================================
+projects:
+  - id: PRJ-001
+    name: "My Narrative AI (Vercel Backend)"
+    type: project
+    repository: mynarrative-ai
+    url: https://github.com/Shuttler14/mynarrative-ai
+    description: "Python serverless functions for B2B gateway, recommendations, checkout, dashboard"
+    status: active
+    deployment: vercel
+    deploy_url: https://drishti-api-blond.vercel.app
+    systems: [SYS-001, SYS-003, SYS-004, SYS-005, SYS-011, SYS-012]
+
+  - id: PRJ-002
+    name: "Drishti (Fly.io Backend)"
+    type: project
+    repository: drishti
+    description: "FastAPI monolith for VTON, recommendations, price comparison, user auth"
+    status: active
+    deployment: fly.io
+    deploy_url: https://drishti-api.fly.dev
+    app_name: drishti-api
+    region: ams
+    systems: [SYS-002, SYS-006, SYS-007, SYS-008, SYS-009, SYS-010, SYS-014, SYS-015, SYS-016, SYS-017, SYS-018, SYS-019, SYS-020]
+
+  - id: PRJ-003
+    name: "Shopify Theme (mynarrative.store)"
+    type: project
+    repository: imageless_test
+    url: https://github.com/Shuttler14/imageless_test
+    description: "Shopify theme with brand dashboard, checkout, AI stylist wizard"
+    status: active
+    deployment: shopify
+    deploy_url: https://mynarrative.store
+    theme_id: "140709101760"
+    systems: [SYS-003, SYS-013]
+
+  - id: PRJ-004
+    name: "Vercel Proxy (drishti-api)"
+    type: project
+    repository: drishti/vercel/
+    description: "Reverse proxy from Vercel to Fly.io, admin dashboard, webhook proxy"
+    status: active
+    deployment: vercel
+    systems: [SYS-017]
+
+  - id: PRJ-005
+    name: "Creator Economy API"
+    type: project
+    repository: mynarrative-ai
+    path: creator-economy-api/
+    description: "Standalone creator economy endpoints (parallel to main gateway)"
+    status: active
+    deployment: vercel
+    systems: [SYS-005]
+
+  - id: PRJ-006
+    name: "Modal VTON Worker"
+    type: project
+    repository: drishti
+    path: modal_vton/
+    description: "Serverless GPU CatVTON on Modal (T4)"
+    status: active
+    deployment: modal
+    systems: [SYS-016]
+
+  - id: PRJ-007
+    name: "Shopify Sync Microservice"
+    type: project
+    repository: drishti
+    path: services/shopify-sync-svc/
+    description: "Dedicated Shopify → Qdrant sync service"
+    status: active
+    deployment: docker
+    systems: [SYS-010]
+
+  - id: PRJ-008
+    name: "Admin Analytics Service"
+    type: project
+    repository: drishti
+    path: services/admin-svc/
+    description: "Prometheus-based admin analytics + Grafana dashboards"
+    status: active
+    deployment: docker
+    systems: [SYS-017]
+
+# ============================================================
+# INTEGRATIONS (INT)
+# ============================================================
+integrations:
+  - id: INT-001
+    name: "OpenAI API"
+    type: integration
+    provider: OpenAI
+    models: [gpt-4o-mini, gpt-4o, text-embedding-3-small]
+    purpose: "Classification, embeddings, explanations, fashion advice, body analysis"
+    used_by: [SYS-001, SYS-002, SYS-005, SYS-018]
+    env_var: OPENAI_API_KEY
+
+  - id: INT-002
+    name: "Replicate API"
+    type: integration
+    provider: Replicate
+    models: [prunaai/p-image-try-on, zhengchong/CatVTON, ZhengPeng7/BiRefNet, thibaud/controlnet-openpose-sdxl-1.0, h94/IP-Adapter, sczhou/CodeFormer]
+    purpose: "GPU inference for VTON, garment extraction, image generation, face preservation"
+    used_by: [SYS-002, SYS-005, SYS-015]
+    env_var: REPLICATE_API_TOKEN
+
+  - id: INT-003
+    name: "Replicate (Vision Models)"
+    type: integration
+    provider: Replicate
+    models: [llava-13b, face-bounds, color-extraction, blip, sam]
+    purpose: "Body analysis, face detection, color extraction, image captioning, segmentation"
+    used_by: [SYS-018, SYS-015]
+    env_var: REPLICATE_API_TOKEN
+
+  - id: INT-004
+    name: "Supabase"
+    type: integration
+    provider: Supabase
+    purpose: "PostgreSQL database, REST API, vector search, auth, storage"
+    used_by: [SYS-001, SYS-003, SYS-004, SYS-005, SYS-012]
+    url: https://fmganuxtqbquubtvvqdo.supabase.co
+    env_vars: [SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY]
+
+  - id: INT-005
+    name: "Cloudflare R2"
+    type: integration
+    provider: Cloudflare
+    purpose: "Image storage for VTON, garment extraction, user uploads"
+    used_by: [SYS-002, SYS-015]
+    env_vars: [R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET]
+
+  - id: INT-006
+    name: "Shopify Admin API"
+    type: integration
+    provider: Shopify
+    purpose: "Product sync, order fulfillment, metafields, webhooks"
+    used_by: [SYS-005, SYS-010, SYS-003]
+    env_vars: [SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL, SHOPIFY_WEBHOOK_SECRET]
+    store_url: https://jjdk0v-0c.myshopify.com
+
+  - id: INT-007
+    name: "Shopify Storefront API"
+    type: integration
+    provider: Shopify
+    purpose: "Cart/checkout operations for creator economy orders"
+    used_by: [SYS-005, SYS-004]
+    env_var: SHOPIFY_ACCESS_TOKEN
+
+  - id: INT-008
+    name: "SerpApi (Google Shopping)"
+    type: integration
+    provider: SerpApi
+    purpose: "Google Shopping search for price comparison and recommendations"
+    used_by: [SYS-006, SYS-007]
+    env_var: SERPAPI_KEY
+
+  - id: INT-009
+    name: "Direct Marketplace Scrapers"
+    type: integration
+    provider: Custom
+    platforms: [Amazon.in, Flipkart.com, Myntra.com, AJIO.com, NykaaFashion.com]
+    purpose: "Fallback price scraping when SerpApi under-delivers"
+    used_by: [SYS-006]
+
+  - id: INT-010
+    name: "InsightFace / ArcFace"
+    type: integration
+    provider: InsightFace
+    models: [buffalo_l]
+    purpose: "Face detection, verification, and swap for VTON face preservation"
+    used_by: [SYS-015]
+
+  - id: INT-011
+    name: "Qdrant Vector DB"
+    type: integration
+    provider: Qdrant
+    purpose: "Vector similarity search for product catalog"
+    used_by: [SYS-010, SYS-007]
+    deployment: fly.io
+    app_name: drishti-qdrant-moonlit-morning-7709
+    env_var: QDRANT_URL
+
+  - id: INT-012
+    name: "fastembed"
+    type: integration
+    provider: Qdrant
+    model: BAAI/bge-small-en-v1.5
+    dimension: 384
+    purpose: "Local embedding generation for product catalog sync"
+    used_by: [SYS-010]
+
+  - id: INT-013
+    name: "Modal"
+    type: integration
+    provider: Modal
+    purpose: "Serverless GPU for CatVTON Mask-Free VTON (T4)"
+    used_by: [SYS-016]
+
+  - id: INT-014
+    name: "OpenWeatherMap API"
+    type: integration
+    provider: OpenWeatherMap
+    purpose: "Weather data for climate-aware styling recommendations"
+    used_by: [SYS-020]
+    env_var: OPENWEATHERMAP_API_KEY
+
+  - id: INT-015
+    name: "AWS Rekognition"
+    type: integration
+    provider: AWS
+    purpose: "Unsafe image detection for content moderation"
+    used_by: [SYS-005]
+    env_vars: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION]
+
+  - id: INT-016
+    name: "AWS S3"
+    type: integration
+    provider: AWS
+    purpose: "Image storage fallback"
+    used_by: [SYS-002, SYS-005]
+    env_vars: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET]
+
+  - id: INT-017
+    name: "Stripe"
+    type: integration
+    provider: Stripe
+    purpose: "Subscription payments"
+    used_by: [SYS-005]
+    env_var: STRIPE_SECRET_KEY
+
+  - id: INT-018
+    name: "Razorpay"
+    type: integration
+    provider: Razorpay
+    purpose: "Payments (India)"
+    used_by: [SYS-004]
+    env_vars: [RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET]
+
+  - id: INT-019
+    name: "Google Gemini"
+    type: integration
+    provider: Google
+    purpose: "Fashion consultant fallback"
+    used_by: [SYS-005]
+    env_var: GEMINI_API_KEY
+
+  - id: INT-020
+    name: "Redis"
+    type: integration
+    provider: Redis
+    purpose: "Rate limiting with in-memory fallback"
+    used_by: [SYS-009, SYS-014]
+    env_var: REDIS_URL
+
+  - id: INT-021
+    name: "SMTP (Email)"
+    type: integration
+    provider: Custom
+    purpose: "OTP email delivery"
+    used_by: [SYS-009]
+    env_vars: [SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS]
+
+  - id: INT-022
+    name: "Sentry"
+    type: integration
+    provider: Sentry
+    purpose: "Error tracking and performance monitoring"
+    used_by: [SYS-014]
+
+# ============================================================
+# APIs (API)
+# ============================================================
+apis:
+  - id: API-001
+    name: "B2B Gateway API"
+    type: api
+    base_url: /api
+    gateway: api/b2b_gateway.py
+    auth: API key (X-API-Key header)
+    endpoints: 35
+    rate_limit: None documented
+    bot_detection: Yes (blocks curl User-Agents)
+
+  - id: API-002
+    name: "Syndicate Gateway API"
+    type: api
+    base_url: /api/syndicate
+    gateway: api/syndicate/gateway.py
+    auth: API key
+    endpoints: 9
+
+  - id: API-003
+    name: "Secondary Gateway API"
+    type: api
+    base_url: /api
+    gateway: api-secondary/handler.py
+    auth: None
+    endpoints: 11
+    notes: "Legacy endpoints, wide-open CORS"
+
+  - id: API-004
+    name: "Creator Economy API"
+    type: api
+    base_url: /api
+    gateway: creator-economy-api/
+    auth: Various
+    endpoints: 15
+
+  - id: API-005
+    name: "Drishti FastAPI"
+    type: api
+    base_url: /
+    gateway: api/main.py
+    auth: JWT + admin secret
+    endpoints: 45
+    deployment: fly.io
+
+  - id: API-006
+    name: "VTOE GPU Server"
+    type: api
+    base_url: /v1
+    gateway: vtoe/api/
+    auth: None (internal)
+    endpoints: 4
+    deployment: self-hosted
+
+  - id: API-007
+    name: "Modal VTON Endpoint"
+    type: api
+    base_url: /v1
+    gateway: modal_vton/app.py
+    auth: None (internal)
+    endpoints: 1
+    deployment: modal
+
+  - id: API-008
+    name: "Admin Analytics API"
+    type: api
+    base_url: /
+    gateway: services/admin-svc/
+    auth: Prometheus
+    endpoints: 4
+    deployment: docker
+
+  - id: API-009
+    name: "Shopify Sync API"
+    type: api
+    base_url: /
+    gateway: services/shopify-sync-svc/
+    auth: ADMIN_SECRET
+    endpoints: 3
+    deployment: docker
+
+# ============================================================
+# DATABASES (DB)
+# ============================================================
+databases:
+  - id: DB-001
+    name: "Brands"
+    table: brands
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, name, slug, logo_url, website_url, network_mode, is_approved, api_key_prefix, created_at, updated_at]
+    notes: "No network_mode or wallet_balance columns in actual schema"
+
+  - id: DB-002
+    name: "API Keys"
+    table: api_keys
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, brand_id, key_hash, key_prefix, name, is_active, created_at, last_used_at]
+
+  - id: DB-003
+    name: "Brand Catalogs"
+    table: brand_catalogs
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, brand_id, name, description, is_active, created_at]
+    notes: "catalog_id is NOT NULL in brand_products"
+
+  - id: DB-004
+    name: "Brand Products"
+    table: brand_products
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, brand, catalog_id, name, description, price, category, images, embedding, is_active, created_at]
+    notes: "Uses brand text field, NOT brand_id; catalog_id is NOT NULL"
+
+  - id: DB-005
+    name: "Brand DNA"
+    table: brand_dna
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [brand_id, style_vector, price_positioning, demographics, created_at, updated_at]
+
+  - id: DB-006
+    name: "Product DNA"
+    table: product_dna
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [product_id, attributes, vector_embedding, created_at]
+
+  - id: DB-007
+    name: "Host Preferences"
+    table: host_preferences
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [brand_id, settings, created_at, updated_at]
+    notes: "brand_id is primary key (no id column)"
+
+  - id: DB-008
+    name: "Host Category Rules"
+    table: host_category_rules
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [id, brand_id, category, rules, created_at]
+
+  - id: DB-009
+    name: "Brand Exclusions"
+    table: brand_exclusions
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [id, source_brand_id, target_brand_id, reason, created_at]
+
+  - id: DB-010
+    name: "Brand Pair Compatibility"
+    table: brand_pair_compatibility
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [brand_a_id, brand_b_id, compatibility_score, dimensions, computed_at]
+
+  - id: DB-011
+    name: "Sponsored Campaigns"
+    table: sponsored_campaigns
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [id, brand_id, name, budget, spent, targeting, status, start_date, end_date, created_at]
+
+  - id: DB-012
+    name: "Network Events"
+    table: network_events
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [id, event_type, brand_id, product_id, user_id, metadata, created_at]
+
+  - id: DB-013
+    name: "Cross-Brand Transactions"
+    table: cross_brand_transactions
+    repository: mynarrative-ai
+    schema: supabase_narrative_network.sql
+    columns: [id, order_id, host_brand_id, guest_brand_id, amount, commission, status, created_at]
+
+  - id: DB-014
+    name: "Users (Cross-Brand)"
+    table: users
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, fingerprint, email, preferences, created_at]
+
+  - id: DB-015
+    name: "User Closet Items"
+    table: user_closet_items
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, user_id, item_data, embedding, created_at]
+
+  - id: DB-016
+    name: "Recommendation Sessions"
+    table: recommendation_sessions
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, user_id, context, created_at]
+
+  - id: DB-017
+    name: "Widget Analytics"
+    table: widget_analytics
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, brand_id, event_type, metadata, created_at]
+
+  - id: DB-018
+    name: "Brand Syndicate Rules"
+    table: brand_syndicate_rules
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [brand_id, rules, created_at]
+
+  - id: DB-019
+    name: "Brand Syndicate Pairings"
+    table: brand_syndicate_pairings
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, brand_a_id, brand_b_id, status, created_at]
+
+  - id: DB-020
+    name: "Affiliate Transactions"
+    table: affiliate_transactions
+    repository: mynarrative-ai
+    schema: supabase_b2b_complete.sql
+    columns: [id, order_id, brand_id, amount, commission, created_at]
+
+  - id: DB-021
+    name: "Global Inventory"
+    table: global_inventory
+    repository: mynarrative-ai
+    schema: supabase_brand_catalog.sql
+    columns: [id, source, source_id, name, brand, price, images, embedding]
+
+  - id: DB-022
+    name: "Creators"
+    table: creators
+    repository: mynarrative-ai
+    schema: supabase_schema.sql
+    columns: [id, user_id, name, tier, lifetime_earnings, created_at]
+
+  - id: DB-023
+    name: "Creator Designs"
+    table: creator_designs
+    repository: mynarrative-ai
+    schema: supabase_schema.sql
+    columns: [id, creator_id, title, status, shopify_product_id, created_at]
+
+  - id: DB-024
+    name: "Creator Payouts"
+    table: creator_payouts
+    repository: mynarrative-ai
+    schema: supabase_schema.sql
+    columns: [id, creator_id, amount, status, created_at]
+
+  - id: DB-025
+    name: "Narrative Addresses"
+    table: narrative_addresses
+    repository: mynarrative-ai
+    schema: supabase_unified_checkout.sql
+    columns: [id, user_id, name, phone, address_line1, address_line2, city, state, pincode, country, is_default]
+    status: NOT DEPLOYED
+
+  - id: DB-026
+    name: "Narrative Cart"
+    table: narrative_cart
+    repository: mynarrative-ai
+    schema: supabase_unified_checkout.sql
+    columns: [id, session_id, brand_id, product_id, quantity, price, created_at]
+    status: NOT DEPLOYED
+
+  - id: DB-027
+    name: "Narrative Orders"
+    table: narrative_orders
+    repository: mynarrative-ai
+    schema: supabase_unified_checkout.sql
+    columns: [id, user_id, status, total, commission, payment_id, created_at]
+    status: NOT DEPLOYED
+
+  - id: DB-028
+    name: "Narrative Order Items"
+    table: narrative_order_items
+    repository: mynarrative-ai
+    schema: supabase_unified_checkout.sql
+    columns: [id, order_id, brand_id, product_id, quantity, price, commission, created_at]
+    status: NOT DEPLOYED
+
+  # Drishti (Fly.io) databases
+  - id: DB-029
+    name: "Users (Drishti)"
+    table: users
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, phone, email, name, role, preferences, body_profile, style_profile, wallet_balance, created_at]
+
+  - id: DB-030
+    name: "OTP Records"
+    table: otp_records
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, contact, otp_hash, purpose, expires_at, attempts]
+
+  - id: DB-031
+    name: "Products (Drishti)"
+    table: products
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, source, source_id, name, brand, category, price, images, embedding, availability]
+
+  - id: DB-032
+    name: "Brands (Drishti)"
+    table: brands
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, name, slug, tier, is_indian]
+
+  - id: DB-033
+    name: "Sessions"
+    table: sessions
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, user_id, session_type, occasion, budget, style_preferences, recommendations, vto_results]
+
+  - id: DB-034
+    name: "Look Cards"
+    table: look_cards
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, session_id, garments, total_price, vto_images, score, feedback, is_saved]
+
+  - id: DB-035
+    name: "Price Alerts"
+    table: price_alerts
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, user_id, source, source_id, target_price, is_active]
+
+  - id: DB-036
+    name: "Offers"
+    table: offers
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, bank, card_network, card_type, discount_type, discount_value, max_discount, coupon_code]
+
+  - id: DB-037
+    name: "User Analyses"
+    table: user_analyses
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, user_id, analysis_type, input_data, results, confidence]
+
+  - id: DB-038
+    name: "Garment Assets"
+    table: garment_assets
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, source_image, segmented_image, mask_image, quality_score]
+
+  - id: DB-039
+    name: "VTON Jobs"
+    table: vton_jobs
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, user_id, session_id, garment_image, person_image, result_image, status, vto_engine, processing_time_ms]
+
+  - id: DB-040
+    name: "Scrape Jobs"
+    table: scrape_jobs
+    repository: drishti
+    schema: alembic/001_initial.py
+    columns: [id, source, category, status, items_found, items_stored]
+
+# ============================================================
+# DEPLOYMENT TARGETS
+# ============================================================
+deployment_targets:
+  - id: DEP-001
+    name: "Vercel (Serverless)"
+    provider: Vercel
+    projects: [PRJ-001, PRJ-004, PRJ-005]
+    max_duration: 30s
+    runtime: Python 3.11
+
+  - id: DEP-002
+    name: "Fly.io (Main API)"
+    provider: Fly.io
+    projects: [PRJ-002]
+    app_name: drishti-api
+    region: ams
+    memory: 1024MB
+    min_machines: 1
+    auto_stop: false
+
+  - id: DEP-003
+    name: "Fly.io (Qdrant)"
+    provider: Fly.io
+    projects: []
+    app_name: drishti-qdrant-moonlit-morning-7709
+    region: ams
+    memory: 512MB
+    volume: drishti_qdrant_data
+
+  - id: DEP-004
+    name: "Shopify (Theme)"
+    provider: Shopify
+    projects: [PRJ-003]
+    store: mynarrative.store
+    theme_id: "140709101760"
+
+  - id: DEP-005
+    name: "Modal (GPU)"
+    provider: Modal
+    projects: [PRJ-006]
+    gpu: T4
+    image: NVIDIA CUDA 12.1.1
+
+  - id: DEP-006
+    name: "Docker (Microservices)"
+    provider: Docker
+    projects: [PRJ-007, PRJ-008]
+
+  - id: DEP-007
+    name: "Supabase (Database)"
+    provider: Supabase
+    projects: [PRJ-001, PRJ-003]
+    url: https://fmganuxtqbquubtvvqdo.supabase.co

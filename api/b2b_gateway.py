@@ -42,6 +42,15 @@ from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
 from api.checkout_api import (
     get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
     create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
+    handle_razorpay_webhook, update_order_status, handle_shopify_webhook,
+)
+from api.tracking import (
+    handle_click_record, handle_tracking_redirect, handle_merchant_pixel_event,
+    handle_shopify_app_proxy, handle_product_registration,
+)
+from api.attribution import (
+    get_commission_summary, run_reconciliation,
+    batch_advance_pending_commissions, batch_advance_confirmed_to_payable,
 )
 
 # Allowed CORS origins for B2B
@@ -105,6 +114,22 @@ class handler(BaseHTTPRequestHandler):
                 if not self._rate_limit_check("default"):
                     return
                 self._respond(200, handle_health())
+
+            elif path.startswith("/api/track/c/"):
+                # Tracking redirect: go.mynarrative.store/c/{click_id}
+                if not self._rate_limit_check("default"):
+                    return
+                click_id = path.split("/")[-1]
+                result = handle_tracking_redirect(click_id)
+                if result.get("redirect"):
+                    self.send_response(302)
+                    self.send_header("Location", result["redirect"])
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                    self._cors_headers(self.headers.get("Origin", ""))
+                    self._security_headers()
+                    self.end_headers()
+                else:
+                    self._respond(404, result)
 
             elif path == "/api/sponsored/pricing":
                 if not self._rate_limit_check("default"):
@@ -292,6 +317,16 @@ class handler(BaseHTTPRequestHandler):
                     return
                 self._respond(200, save_address(body))
 
+            # ── Public: Shopify Webhook (no auth, HMAC verified internally) ──
+            elif path == "/api/webhooks/shopify":
+                self._respond(200, handle_shopify_webhook(body, dict(self.headers)))
+
+            # ── Public: Order Status Update (for brands) ──
+            elif path == "/api/orders/status":
+                if not self._rate_limit_check("default"):
+                    return
+                self._respond(200, update_order_status(body))
+
             # ── Public: Recommend (customer-facing widget, no API key) ──
             elif path == "/api/recommend":
                 if not self._rate_limit_check("recommend"):
@@ -307,6 +342,31 @@ class handler(BaseHTTPRequestHandler):
                 body["brand_id"] = body.get("brand_id", "")
                 body["user_id"] = body.get("user_id", "")
                 result = handle_recommend(body)
+                self._respond(200, result)
+
+            # ── Public: Tracking & Attribution (no auth) ──────────────
+            elif path == "/api/track/click":
+                if not self._rate_limit_check("default"):
+                    return
+                result = handle_click_record(body, dict(self.headers))
+                self._respond(200, result)
+
+            elif path == "/api/webhooks/merchant-pixel":
+                if not self._rate_limit_check("default"):
+                    return
+                result = handle_merchant_pixel_event(body)
+                self._respond(200, result)
+
+            elif path == "/api/products/register":
+                if not self._rate_limit_check("default"):
+                    return
+                result = handle_product_registration(body)
+                self._respond(200, result)
+
+            elif path == "/api/reconciliation/run":
+                if not self._rate_limit_check("default"):
+                    return
+                result = run_reconciliation()
                 self._respond(200, result)
 
             # ── Authenticated endpoints ────────────────────────────────
@@ -430,6 +490,25 @@ class handler(BaseHTTPRequestHandler):
                         campaign_id=body.get("campaign_id", ""),
                         event_data=body.get("event_data", {}),
                     )
+                    self._respond(200, result)
+
+                # ── Commission & Attribution Queries ──────────────────
+                elif path == "/api/commissions/summary":
+                    if not self._rate_limit_check("default"):
+                        return
+                    result = get_commission_summary(brand_id)
+                    self._respond(200, result)
+
+                elif path == "/api/commissions/advance":
+                    if not self._rate_limit_check("default"):
+                        return
+                    result = batch_advance_pending_commissions()
+                    self._respond(200, result)
+
+                elif path == "/api/commissions/advance-payable":
+                    if not self._rate_limit_check("default"):
+                        return
+                    result = batch_advance_confirmed_to_payable()
                     self._respond(200, result)
 
                 # ── Eligibility Check ─────────────────────────────────

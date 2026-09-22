@@ -1,0 +1,44 @@
+# CODEOWNERS — My Narrative Commerce Network
+
+# Default owners for everything
+* @Shuttler14
+
+# Vercel Backend
+mynarrative-ai - Copy (3)/api/ @Shuttler14
+mynarrative-ai - Copy (3)/api/recommend/ @Shuttler14
+mynarrative-ai - Copy (3)/api/dashboard/ @Shuttler14
+mynarrative-ai - Copy (3)/api/checkout_api.py @Shuttler14
+mynarrative-ai - Copy (3)/api/creator_economy.py @Shuttler14
+
+# Fly.io Backend
+/Users/shuttler/Desktop/Drishti/api/ @Shuttler14
+/Users/shuttler/Desktop/Drishti/api/routers/ @Shuttler14
+/Users/shuttler/Desktop/Drishti/api/services/ @Shuttler14
+/Users/shuttler/Desktop/Drishti/vtoe/ @Shuttler14
+/Users/shuttler/Desktop/Drishti/modal_vton/ @Shuttler14
+
+# Shopify Theme
+current - Copy (3)/assets/ @Shuttler14
+current - Copy (3)/templates/ @Shuttler14
+current - Copy (3)/assets/brand-dashboard.js @Shuttler14
+current - Copy (3)/assets/MN-stylist-wizard-v4.js @Shuttler14
+
+# Documentation
+docs/ @Shuttler14
+AGENTS.md @Shuttler14
+CONTRIBUTING.md @Shuttler14
+docs/CHANGE_TRACKING.md @Shuttler14
+
+# Infrastructure
+vercel.json @Shuttler14
+fly.toml @Shuttler14
+Dockerfile @Shuttler14
+docker-compose.yml @Shuttler14
+requirements.txt @Shuttler14
+
+# SQL Migrations
+*.sql @Shuttler14
+
+# Tests
+tests/ @Shuttler14
+loadtest/ @Shuttler14
