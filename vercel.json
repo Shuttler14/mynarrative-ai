@@ -2,19 +2,10 @@
   "functions": {
     "api/b2b_gateway.py": {
       "maxDuration": 30
-    },
-    "api/cron_reconciliation.py": {
-      "maxDuration": 60
     }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/b2b_gateway" },
     { "source": "/c/:click_id", "destination": "/api/b2b_gateway" }
-  ],
-  "crons": [
-    {
-      "path": "/api/reconciliation/run",
-      "schedule": "0 */6 * * *"
-    }
   ]
 }

@@ -513,7 +513,9 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(403, {"error": "forbidden"})
                 return
 
-            # ── User Auth & Profile POST (proxy BEFORE reading body) ──
+            content_length = int(self.headers.get("Content-Length", 0))
+
+            # ── User Auth & Profile POST ──────────────────────────────
             if path.startswith("/api/auth/send-otp"):
                 body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
                 self._auth_send_otp(body)
@@ -572,7 +574,6 @@ class handler(BaseHTTPRequestHandler):
                     self._save_user_outfit(uid, body)
                 return
 
-            content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 512000:
                 self._respond(413, {"error": "payload_too_large"})
                 return
