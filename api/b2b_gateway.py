@@ -66,6 +66,7 @@ from api.core import validate_api_key, validate_api_key_format, sb_request
 from api.closet.items import handle_closet_list, handle_closet_add
 from api.closet.upload import handle_closet_upload
 from api.user.identify import handle_identify
+from api.checkout_api import (
     get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
     create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
     handle_razorpay_webhook, update_order_status, handle_shopify_webhook,
@@ -293,7 +294,8 @@ class handler(BaseHTTPRequestHandler):
         if not all(k in body for k in required):
             self._respond(400, {"error": "bank_name, card_type, card_variant required"})
             return
-        card_id = f"card_{int(_time.time())}_{hashlib.sha256(f'{uid}{body[\"card_variant\"]}'.encode()).hexdigest()[:8]}"
+        variant = body["card_variant"]
+        card_id = f"card_{int(_time.time())}_{hashlib.sha256((uid + variant).encode()).hexdigest()[:8]}"
         card = {"card_id": card_id, "user_id": uid, "bank_name": body["bank_name"],
                 "card_type": body["card_type"], "card_variant": body["card_variant"],
                 "card_network": body.get("card_network"), "is_primary": body.get("is_primary", False)}
@@ -304,7 +306,8 @@ class handler(BaseHTTPRequestHandler):
             self._respond(500, {"error": str(e)})
 
     def _add_user_person(self, uid, body):
-        person_id = f"person_{int(_time.time())}_{hashlib.sha256(f'{uid}{body.get(\"label\",\"\")}'.encode()).hexdigest()[:8]}"
+        label = body.get("label", "")
+        person_id = f"person_{int(_time.time())}_{hashlib.sha256((uid + label).encode()).hexdigest()[:8]}"
         person = {"person_id": person_id, "user_id": uid,
                   "relationship": body.get("relationship", "self"),
                   "label": body.get("label", "Me"),
