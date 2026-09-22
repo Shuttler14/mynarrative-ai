@@ -179,14 +179,9 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(200, get_order_detail(order_id))
 
             # ── User Auth & Profile GET (no API key) ─────────────────
-            elif path == "/api/auth/me":
-                from api.auth import handler as auth_handler
-                auth_handler.do_GET(self) if hasattr(auth_handler, 'do_GET') else None
-                self._proxy_to_handler(auth_handler, "GET")
-
-            elif path == "/api/user/profile" or path == "/api/user/cards" or path == "/api/user/persons" or path == "/api/user/outfits" or path == "/api/user/media" or path == "/api/user/recommendations" or path == "/api/user/stats":
-                from api.user import handler as user_handler
-                self._proxy_to_handler(user_handler, "GET")
+            elif path.startswith("/api/auth") or path.startswith("/api/user"):
+                mod = "api.auth" if "auth" in path else "api.user"
+                self._proxy_to_handler(__import__(mod, fromlist=["handler"]).handler, "GET")
 
             # ── Authenticated GET endpoints ───────────────────────────────
             else:
@@ -283,6 +278,14 @@ class handler(BaseHTTPRequestHandler):
             ua = self.headers.get("User-Agent", "")
             if is_bot_request(ua):
                 self._respond(403, {"error": "forbidden"})
+                return
+
+            # ── User Auth & Profile POST (proxy BEFORE reading body) ──
+            if path.startswith("/api/auth/") or path.startswith("/api/user/"):
+                self._proxy_to_handler(
+                    __import__("api.auth" if "auth" in path else "api.user", fromlist=["handler"]).handler,
+                    "POST"
+                )
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
@@ -399,15 +402,6 @@ class handler(BaseHTTPRequestHandler):
                     return
                 result = run_reconciliation()
                 self._respond(200, result)
-
-            # ── User Auth & Profile POST (no API key) ─────────────────
-            elif path.startswith("/api/auth/"):
-                from api.auth import handler as auth_handler
-                self._proxy_to_handler(auth_handler, "POST")
-
-            elif path.startswith("/api/user/"):
-                from api.user import handler as user_handler
-                self._proxy_to_handler(user_handler, "POST")
 
             # ── Authenticated endpoints ────────────────────────────────
             else:
