@@ -14,11 +14,6 @@ from api.security import (
     check_rate_limit, get_client_ip, sanitize_body, validate_api_key_format,
     is_bot_request, sign_request, verify_request_signature,
 )
-
-# Auth/Profile helpers (inline to avoid proxy issues)
-import hashlib, time as _time, secrets as _secrets
-_AUTH_OTP_STORE = {}
-_AUTH_OTP_TTL = 300
 from api.core import validate_api_key, create_session_token
 from api.core.supabase import sb_request
 from api.widget.bootstrap import handle_bootstrap
@@ -45,31 +40,9 @@ from api.dashboard import (
 )
 from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
 from api.checkout_api import (
-    get_cart, get_addresses, get_orders, get_order_detail
-)
-from api.recommend.outfits import handle_recommend
-from api.sponsored.campaigns import handle_list_campaigns, handle_create_campaign
-from api.sponsored.pricing import handle_pricing_tiers
-from api.analytics import handle_network_event, handle_pricing_ping
-from api.attribution import (
-    handle_product_registration, handle_click_record,
-    handle_merchant_pixel_event, run_reconciliation,
-    handle_commission_summary, handle_attribution_report,
-)
-from api.brand.register import handle_brand_register
-from api.brand_catalog import handle_catalog_sync
-from api.brand_search_api import handle_brand_search
-from api.subscription.status import handle_subscription_status
-from api.subscription.payment_providers import handle_provider_pay, handle_provider_webhook
-from api.widget.bootstrap import handle_bootstrap
-from api.core import validate_api_key, validate_api_key_format, sb_request
-from api.closet.items import handle_closet_list, handle_closet_add
-from api.closet.upload import handle_closet_upload
-from api.user.identify import handle_identify
-from api.checkout_api import (
     get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
-    create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
-    handle_razorpay_webhook, update_order_status, handle_shopify_webhook,
+    create_order, save_address, get_addresses, get_orders, get_order_detail,
+    update_order_status, handle_shopify_webhook,
 )
 from api.tracking import (
     handle_click_record, handle_tracking_redirect, handle_merchant_pixel_event,
@@ -79,6 +52,11 @@ from api.attribution import (
     get_commission_summary, run_reconciliation,
     batch_advance_pending_commissions, batch_advance_confirmed_to_payable,
 )
+
+# Auth/Profile (inline to avoid proxy issues)
+import hashlib, time as _time, secrets as _secrets
+_AUTH_OTP_STORE = {}
+_AUTH_OTP_TTL = 300
 
 # Allowed CORS origins for B2B
 ALLOWED_ORIGINS = [
