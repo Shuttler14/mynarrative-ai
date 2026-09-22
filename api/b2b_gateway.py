@@ -55,7 +55,6 @@ from api.attribution import (
 
 # Auth/Profile (inline to avoid proxy issues)
 import hashlib, time as _time, secrets as _secrets
-_AUTH_OTP_STORE = {}
 _AUTH_OTP_TTL = 300
 
 # Allowed CORS origins for B2B
@@ -126,8 +125,17 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "Valid email required"})
             return
         otp = self._auth_generate_otp()
-        _AUTH_OTP_STORE[email] = {"otp": otp, "ts": _time.time(), "attempts": 0}
-        # In prod, send via Resend/SendGrid. For now, log it.
+        expires_at = _time.time() + _AUTH_OTP_TTL
+        from datetime import datetime, timezone
+        expires_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+        # Store OTP in Supabase (persistent across Lambda instances)
+        try:
+            sb_request("POST", "/rest/v1/mn_otp_codes", {
+                "email": email, "otp_code": otp,
+                "expires_at": expires_iso, "is_used": False
+            })
+        except Exception as e:
+            print(f"[AUTH] OTP store failed: {e}")
         print(f"[AUTH] OTP for {email}: {otp}")
         try:
             users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
@@ -142,23 +150,30 @@ class handler(BaseHTTPRequestHandler):
         if not email or not otp:
             self._respond(400, {"error": "Email and OTP required"})
             return
-        stored = _AUTH_OTP_STORE.get(email)
-        if not stored:
+        # Verify against Supabase
+        try:
+            rows = sb_request("GET",
+                f"/rest/v1/mn_otp_codes?email=eq.{email}&is_used=eq.false&order=created_at.desc&limit=1")
+        except Exception as e:
+            self._respond(500, {"error": f"OTP lookup failed: {e}"})
+            return
+        if not rows:
             self._respond(400, {"error": "No code requested. Send a new one."})
             return
-        if _time.time() - stored["ts"] > _AUTH_OTP_TTL:
-            del _AUTH_OTP_STORE[email]
+        stored = rows[0]
+        from datetime import datetime, timezone
+        exp = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
+        if datetime.now(tz=timezone.utc) > exp:
             self._respond(400, {"error": "Code expired. Send a new one."})
             return
-        if stored["attempts"] >= 5:
-            del _AUTH_OTP_STORE[email]
-            self._respond(400, {"error": "Too many attempts. Send a new code."})
+        if stored["otp_code"] != otp:
+            self._respond(400, {"error": "Wrong code."})
             return
-        stored["attempts"] += 1
-        if stored["otp"] != otp:
-            self._respond(400, {"error": f"Wrong code. {5 - stored['attempts']} attempts left."})
-            return
-        del _AUTH_OTP_STORE[email]
+        # Mark OTP used
+        try:
+            sb_request("PATCH", f"/rest/v1/mn_otp_codes?id=eq.{stored['id']}", {"is_used": True})
+        except Exception:
+            pass
         user_id = f"mn_{hashlib.sha256(email.encode()).hexdigest()[:16]}"
         try:
             users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
