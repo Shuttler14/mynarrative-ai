@@ -160,14 +160,36 @@ class handler(BaseHTTPRequestHandler):
         self._respond(200, stats)
 
     def _update_user_profile(self, uid, body):
-        allowed = {"display_name","gender","age_range","height_cm","body_type",
-                    "preferred_styles","preferred_colors","avoid_colors","preferred_patterns","fit_preference"}
-        updates = {k: v for k, v in body.items() if k in allowed and v is not None}
-        if not updates:
+        """Update user profile fields. Body/style fields go to person_profiles (self)."""
+        # Fields on mn_user_profiles
+        user_fields = {"display_name", "gender", "age_range"}
+        # Fields on mn_person_profiles (for the "self" person)
+        person_fields = {"height_cm", "body_type", "shoulder_structure", "torso_length",
+                         "leg_proportion", "fit_preference", "preferred_styles",
+                         "preferred_colors", "avoid_colors", "preferred_patterns"}
+
+        user_updates = {k: v for k, v in body.items() if k in user_fields and v is not None}
+        person_updates = {k: v for k, v in body.items() if k in person_fields and v is not None}
+
+        if not user_updates and not person_updates:
             self._respond(400, {"error": "No valid fields to update"})
             return
+
         try:
-            sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}", updates)
+            if user_updates:
+                sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}", user_updates)
+            if person_updates:
+                # Update the "self" person profile
+                try:
+                    persons = sb_request("GET", f"/rest/v1/mn_person_profiles?user_id=eq.{uid}&is_self=eq.true&select=person_id")
+                    if persons:
+                        sb_request("PATCH", f"/rest/v1/mn_person_profiles?person_id=eq.{persons[0]['person_id']}", person_updates)
+                    else:
+                        # Create self person profile
+                        person = {"user_id": uid, "is_self": True, "relationship": "self", **person_updates}
+                        sb_request("POST", "/rest/v1/mn_person_profiles", person)
+                except Exception:
+                    pass
             self._respond(200, {"ok": True})
         except Exception as e:
             self._respond(500, {"error": str(e)})
@@ -197,9 +219,14 @@ class handler(BaseHTTPRequestHandler):
                   "is_self": body.get("is_self", body.get("relationship", "self") == "self"),
                   "preferred_styles": body.get("preferred_styles", []),
                   "preferred_colors": body.get("preferred_colors", []),
+                  "avoid_colors": body.get("avoid_colors", []),
+                  "preferred_patterns": body.get("preferred_patterns", []),
                   "fit_preference": body.get("fit_preference"),
                   "height_cm": body.get("height_cm"),
-                  "body_type": body.get("body_type")}
+                  "body_type": body.get("body_type"),
+                  "shoulder_structure": body.get("shoulder_structure"),
+                  "torso_length": body.get("torso_length"),
+                  "leg_proportion": body.get("leg_proportion")}
         try:
             result = sb_request("POST", "/rest/v1/mn_person_profiles", person)
             self._respond(201, result[0] if result else person)
@@ -224,6 +251,8 @@ class handler(BaseHTTPRequestHandler):
         email = body.get("email", "")
         name = body.get("name", "")
         gender = body.get("gender", "")
+        from datetime import datetime, timezone
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
         try:
             existing = sb_request("GET", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}&select=user_id")
             updates = {}
@@ -233,7 +262,7 @@ class handler(BaseHTTPRequestHandler):
                 updates["display_name"] = name
             if gender:
                 updates["gender"] = gender
-            updates["last_active_at"] = "now()"
+            updates["last_active_at"] = now_iso
             if existing:
                 sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}", updates)
             else:
@@ -806,10 +835,9 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(403, {"error": "forbidden"})
                 return
 
-            # ── User Profile DELETE (no API key) ─────────────────────
+            # ── User Profile DELETE (Shopify customer auth) ──────────
             if path.startswith("/api/user/"):
-                token = self.headers.get("Authorization", "").replace("Bearer ", "")
-                uid = self._auth_verify_token(token)
+                uid = self._get_shopify_uid()
                 if not uid:
                     self._respond(401, {"error": "Authentication required"})
                     return
