@@ -97,6 +97,27 @@ class handler(BaseHTTPRequestHandler):
         self._security_headers()
         self.end_headers()
 
+    def _proxy_to_handler(self, handler_cls, method):
+        """Proxy request to a sub-handler (auth.py, user.py).
+        These handlers write directly to self.wfile with their own send_response/send_header."""
+        try:
+            h = handler_cls()
+            h.rfile = self.rfile
+            h.wfile = self.wfile
+            h.headers = self.headers
+            h.path = self.path
+            h.command = method
+            h.request_version = self.request_version
+            h.close_connection = True
+            if method == "GET":
+                h.do_GET()
+            elif method == "POST":
+                h.do_POST()
+            elif method == "DELETE":
+                h.do_DELETE()
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
     def do_GET(self):
         try:
             from urllib.parse import urlparse, parse_qs
@@ -156,6 +177,16 @@ class handler(BaseHTTPRequestHandler):
                     return
                 order_id = path.split("/")[-1]
                 self._respond(200, get_order_detail(order_id))
+
+            # ── User Auth & Profile GET (no API key) ─────────────────
+            elif path == "/api/auth/me":
+                from api.auth import handler as auth_handler
+                auth_handler.do_GET(self) if hasattr(auth_handler, 'do_GET') else None
+                self._proxy_to_handler(auth_handler, "GET")
+
+            elif path == "/api/user/profile" or path == "/api/user/cards" or path == "/api/user/persons" or path == "/api/user/outfits" or path == "/api/user/media" or path == "/api/user/recommendations" or path == "/api/user/stats":
+                from api.user import handler as user_handler
+                self._proxy_to_handler(user_handler, "GET")
 
             # ── Authenticated GET endpoints ───────────────────────────────
             else:
@@ -369,6 +400,15 @@ class handler(BaseHTTPRequestHandler):
                 result = run_reconciliation()
                 self._respond(200, result)
 
+            # ── User Auth & Profile POST (no API key) ─────────────────
+            elif path.startswith("/api/auth/"):
+                from api.auth import handler as auth_handler
+                self._proxy_to_handler(auth_handler, "POST")
+
+            elif path.startswith("/api/user/"):
+                from api.user import handler as user_handler
+                self._proxy_to_handler(user_handler, "POST")
+
             # ── Authenticated endpoints ────────────────────────────────
             else:
                 if not self._rate_limit_check("recommend"):
@@ -575,6 +615,37 @@ class handler(BaseHTTPRequestHandler):
 
         except json.JSONDecodeError:
             self._respond(400, {"error": "invalid_json"})
+        except Exception as e:
+            self._respond(500, {"error": sanitize_error(e)})
+
+    def do_DELETE(self):
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/")
+            query = parse_qs(parsed.query)
+
+            ua = self.headers.get("User-Agent", "")
+            if is_bot_request(ua):
+                self._respond(403, {"error": "forbidden"})
+                return
+
+            # ── User Profile DELETE (no API key) ─────────────────────
+            if path.startswith("/api/user/"):
+                from api.user import handler as user_h
+                h = user_h()
+                h.rfile = self.rfile
+                h.wfile = self.wfile
+                h.headers = self.headers
+                h.path = self.path
+                h.command = "DELETE"
+                h.request_version = self.request_version
+                h.close_connection = True
+                h.do_DELETE()
+                return
+
+            self._respond(404, {"error": "not_found"})
+
         except Exception as e:
             self._respond(500, {"error": sanitize_error(e)})
 
