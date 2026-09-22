@@ -14,6 +14,11 @@ from api.security import (
     check_rate_limit, get_client_ip, sanitize_body, validate_api_key_format,
     is_bot_request, sign_request, verify_request_signature,
 )
+
+# Auth/Profile helpers (inline to avoid proxy issues)
+import hashlib, time as _time, secrets as _secrets
+_AUTH_OTP_STORE = {}
+_AUTH_OTP_TTL = 300
 from api.core import validate_api_key, create_session_token
 from api.core.supabase import sb_request
 from api.widget.bootstrap import handle_bootstrap
@@ -40,6 +45,27 @@ from api.dashboard import (
 )
 from api.shopify.sync import start_shopify_sync, register_shopify_webhooks
 from api.checkout_api import (
+    get_cart, get_addresses, get_orders, get_order_detail
+)
+from api.recommend.outfits import handle_recommend
+from api.sponsored.campaigns import handle_list_campaigns, handle_create_campaign
+from api.sponsored.pricing import handle_pricing_tiers
+from api.analytics import handle_network_event, handle_pricing_ping
+from api.attribution import (
+    handle_product_registration, handle_click_record,
+    handle_merchant_pixel_event, run_reconciliation,
+    handle_commission_summary, handle_attribution_report,
+)
+from api.brand.register import handle_brand_register
+from api.brand_catalog import handle_catalog_sync
+from api.brand_search_api import handle_brand_search
+from api.subscription.status import handle_subscription_status
+from api.subscription.payment_providers import handle_provider_pay, handle_provider_webhook
+from api.widget.bootstrap import handle_bootstrap
+from api.core import validate_api_key, validate_api_key_format, sb_request
+from api.closet.items import handle_closet_list, handle_closet_add
+from api.closet.upload import handle_closet_upload
+from api.user.identify import handle_identify
     get_cart, add_to_cart, update_cart_item, remove_from_cart, clear_cart,
     create_order, verify_payment, save_address, get_addresses, get_orders, get_order_detail,
     handle_razorpay_webhook, update_order_status, handle_shopify_webhook,
@@ -91,6 +117,222 @@ class handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    # ── Auth Helpers (inline) ──────────────────────────────────────────
+    def _auth_generate_otp(self):
+        return f"{_secrets.randbelow(900000) + 100000}"
+
+    def _auth_create_token(self, user_id, email):
+        payload = f"{user_id}:{email}:{int(_time.time())}"
+        sig = hashlib.sha256(f"{payload}:mn_secret".encode()).hexdigest()[:16]
+        return f"{payload}:{sig}"
+
+    def _auth_verify_token(self, token):
+        try:
+            parts = token.split(":")
+            if len(parts) != 4:
+                return None
+            user_id, email, ts, sig = parts
+            expected = hashlib.sha256(f"{user_id}:{email}:{ts}:mn_secret".encode()).hexdigest()[:16]
+            if sig != expected:
+                return None
+            if int(_time.time()) - int(ts) > 86400 * 30:
+                return None
+            return user_id
+        except Exception:
+            return None
+
+    def _auth_send_otp(self, body):
+        email = (body.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            self._respond(400, {"error": "Valid email required"})
+            return
+        otp = self._auth_generate_otp()
+        _AUTH_OTP_STORE[email] = {"otp": otp, "ts": _time.time(), "attempts": 0}
+        # In prod, send via Resend/SendGrid. For now, log it.
+        print(f"[AUTH] OTP for {email}: {otp}")
+        try:
+            users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
+            is_new = len(users) == 0
+        except Exception:
+            is_new = True
+        self._respond(200, {"ok": True, "is_new_user": is_new})
+
+    def _auth_verify_otp(self, body):
+        email = (body.get("email") or "").strip().lower()
+        otp = (body.get("otp") or "").strip()
+        if not email or not otp:
+            self._respond(400, {"error": "Email and OTP required"})
+            return
+        stored = _AUTH_OTP_STORE.get(email)
+        if not stored:
+            self._respond(400, {"error": "No code requested. Send a new one."})
+            return
+        if _time.time() - stored["ts"] > _AUTH_OTP_TTL:
+            del _AUTH_OTP_STORE[email]
+            self._respond(400, {"error": "Code expired. Send a new one."})
+            return
+        if stored["attempts"] >= 5:
+            del _AUTH_OTP_STORE[email]
+            self._respond(400, {"error": "Too many attempts. Send a new code."})
+            return
+        stored["attempts"] += 1
+        if stored["otp"] != otp:
+            self._respond(400, {"error": f"Wrong code. {5 - stored['attempts']} attempts left."})
+            return
+        del _AUTH_OTP_STORE[email]
+        user_id = f"mn_{hashlib.sha256(email.encode()).hexdigest()[:16]}"
+        try:
+            users = sb_request("GET", f"/rest/v1/mn_user_profiles?email=eq.{email}&select=user_id")
+            if users:
+                user_id = users[0]["user_id"]
+                is_new = False
+            else:
+                sb_request("POST", "/rest/v1/mn_user_profiles", {"user_id": user_id, "email": email})
+                is_new = True
+        except Exception:
+            is_new = True
+        token = self._auth_create_token(user_id, email)
+        self._respond(200, {"ok": True, "token": token, "user_id": user_id, "email": email, "is_new_user": is_new})
+
+    def _auth_complete_profile(self, body):
+        email = (body.get("email") or "").strip().lower()
+        name = (body.get("name") or "").strip()
+        gender = (body.get("gender") or "").strip()
+        if not email:
+            self._respond(400, {"error": "Email required"})
+            return
+        user_id = f"mn_{hashlib.sha256(email.encode()).hexdigest()[:16]}"
+        updates = {}
+        if name:
+            updates["display_name"] = name
+        if gender:
+            updates["gender"] = gender
+        if updates:
+            try:
+                sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{user_id}", updates)
+            except Exception:
+                try:
+                    sb_request("POST", "/rest/v1/mn_user_profiles", {"user_id": user_id, "email": email, **updates})
+                except Exception:
+                    pass
+        token = self._auth_create_token(user_id, email)
+        self._respond(200, {"ok": True, "token": token, "user_id": user_id, "email": email, "display_name": name, "gender": gender})
+
+    # ── User Profile Handlers ──────────────────────────────────────────
+    def _handle_user_profile(self, uid):
+        try:
+            users = sb_request("GET", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}&select=*")
+            profile = users[0] if users else None
+        except Exception:
+            profile = None
+        if not profile:
+            self._respond(200, {"user_id": uid, "exists": False})
+            return
+        for table, key in [("mn_person_profiles","person_count"),("mn_saved_cards","card_count"),
+                           ("mn_saved_outfits","outfit_count"),("mn_tryon_sessions","tryon_count")]:
+            try:
+                rows = sb_request("GET", f"/rest/v1/{table}?user_id=eq.{uid}&select=user_id")
+                profile[key] = len(rows)
+            except Exception:
+                profile[key] = 0
+        self._respond(200, profile)
+
+    def _handle_user_cards(self, uid):
+        try:
+            cards = sb_request("GET", f"/rest/v1/mn_saved_cards?user_id=eq.{uid}&select=*&order=is_primary.desc,created_at.desc")
+        except Exception:
+            cards = []
+        for c in cards:
+            try:
+                offers = sb_request("GET", f"/rest/v1/mn_merchant_offers?bank_name=eq.{c['bank_name']}&is_active=eq.true&select=offer_id")
+                c["active_offers"] = len(offers)
+            except Exception:
+                c["active_offers"] = 0
+        self._respond(200, cards)
+
+    def _handle_user_persons(self, uid):
+        try:
+            persons = sb_request("GET", f"/rest/v1/mn_person_profiles?user_id=eq.{uid}&select=*&order=is_self.desc,created_at.desc")
+        except Exception:
+            persons = []
+        self._respond(200, persons)
+
+    def _handle_user_outfits(self, uid):
+        try:
+            outfits = sb_request("GET", f"/rest/v1/mn_saved_outfits?user_id=eq.{uid}&select=*&order=created_at.desc&limit=50")
+        except Exception:
+            outfits = []
+        self._respond(200, outfits)
+
+    def _handle_user_stats(self, uid):
+        stats = {}
+        for table, key in [("mn_person_profiles","persons"),("mn_saved_cards","cards"),
+                           ("mn_saved_outfits","outfits"),("mn_tryon_sessions","tryons")]:
+            try:
+                rows = sb_request("GET", f"/rest/v1/{table}?user_id=eq.{uid}&select=user_id")
+                stats[key] = len(rows)
+            except Exception:
+                stats[key] = 0
+        self._respond(200, stats)
+
+    def _update_user_profile(self, uid, body):
+        allowed = {"display_name","gender","age_range","height_cm","body_type",
+                    "preferred_styles","preferred_colors","avoid_colors","preferred_patterns","fit_preference"}
+        updates = {k: v for k, v in body.items() if k in allowed and v is not None}
+        if not updates:
+            self._respond(400, {"error": "No valid fields to update"})
+            return
+        try:
+            sb_request("PATCH", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}", updates)
+            self._respond(200, {"ok": True})
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _add_user_card(self, uid, body):
+        required = {"bank_name", "card_type", "card_variant"}
+        if not all(k in body for k in required):
+            self._respond(400, {"error": "bank_name, card_type, card_variant required"})
+            return
+        card_id = f"card_{int(_time.time())}_{hashlib.sha256(f'{uid}{body[\"card_variant\"]}'.encode()).hexdigest()[:8]}"
+        card = {"card_id": card_id, "user_id": uid, "bank_name": body["bank_name"],
+                "card_type": body["card_type"], "card_variant": body["card_variant"],
+                "card_network": body.get("card_network"), "is_primary": body.get("is_primary", False)}
+        try:
+            result = sb_request("POST", "/rest/v1/mn_saved_cards", card)
+            self._respond(201, result[0] if result else card)
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _add_user_person(self, uid, body):
+        person_id = f"person_{int(_time.time())}_{hashlib.sha256(f'{uid}{body.get(\"label\",\"\")}'.encode()).hexdigest()[:8]}"
+        person = {"person_id": person_id, "user_id": uid,
+                  "relationship": body.get("relationship", "self"),
+                  "label": body.get("label", "Me"),
+                  "is_self": body.get("is_self", body.get("relationship", "self") == "self"),
+                  "preferred_styles": body.get("preferred_styles", []),
+                  "preferred_colors": body.get("preferred_colors", []),
+                  "fit_preference": body.get("fit_preference"),
+                  "height_cm": body.get("height_cm"),
+                  "body_type": body.get("body_type")}
+        try:
+            result = sb_request("POST", "/rest/v1/mn_person_profiles", person)
+            self._respond(201, result[0] if result else person)
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _save_user_outfit(self, uid, body):
+        outfit_id = f"outfit_{int(_time.time())}_{hashlib.sha256(json.dumps(body.get('items',[])).encode()).hexdigest()[:8]}"
+        outfit = {"outfit_id": outfit_id, "user_id": uid, "person_id": body.get("person_id"),
+                  "outfit_name": body.get("outfit_name"), "occasion": body.get("occasion"),
+                  "items": body.get("items", []), "total_price": body.get("total_price"),
+                  "best_price": body.get("best_price"), "best_offer": body.get("best_offer"),
+                  "vton_image_url": body.get("vton_image_url"), "card_id": body.get("card_id")}
+        try:
+            result = sb_request("POST", "/rest/v1/mn_saved_outfits", outfit)
+            self._respond(201, result[0] if result else outfit)
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors_headers(self.headers.get("Origin", ""))
@@ -98,25 +340,8 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _proxy_to_handler(self, handler_cls, method):
-        """Proxy request to a sub-handler (auth.py, user.py).
-        These handlers write directly to self.wfile with their own send_response/send_header."""
-        try:
-            h = handler_cls()
-            h.rfile = self.rfile
-            h.wfile = self.wfile
-            h.headers = self.headers
-            h.path = self.path
-            h.command = method
-            h.request_version = self.request_version
-            h.close_connection = True
-            if method == "GET":
-                h.do_GET()
-            elif method == "POST":
-                h.do_POST()
-            elif method == "DELETE":
-                h.do_DELETE()
-        except Exception as e:
-            self._respond(500, {"error": str(e)})
+        """Legacy proxy - unused"""
+        pass
 
     def do_GET(self):
         try:
@@ -179,9 +404,36 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(200, get_order_detail(order_id))
 
             # ── User Auth & Profile GET (no API key) ─────────────────
-            elif path.startswith("/api/auth") or path.startswith("/api/user"):
-                mod = "api.auth" if "auth" in path else "api.user"
-                self._proxy_to_handler(__import__(mod, fromlist=["handler"]).handler, "GET")
+            elif path.startswith("/api/auth/me"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Invalid session"})
+                else:
+                    try:
+                        users = sb_request("GET", f"/rest/v1/mn_user_profiles?user_id=eq.{uid}&select=*")
+                        user = users[0] if users else {"user_id": uid}
+                        self._respond(200, user)
+                    except Exception:
+                        self._respond(200, {"user_id": uid})
+
+            elif path.startswith("/api/user/"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                elif path == "/api/user/profile":
+                    self._handle_user_profile(uid)
+                elif path == "/api/user/cards":
+                    self._handle_user_cards(uid)
+                elif path == "/api/user/persons":
+                    self._handle_user_persons(uid)
+                elif path == "/api/user/outfits":
+                    self._handle_user_outfits(uid)
+                elif path == "/api/user/stats":
+                    self._handle_user_stats(uid)
+                else:
+                    self._respond(404, {"error": "Not found"})
 
             # ── Authenticated GET endpoints ───────────────────────────────
             else:
@@ -281,11 +533,62 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             # ── User Auth & Profile POST (proxy BEFORE reading body) ──
-            if path.startswith("/api/auth/") or path.startswith("/api/user/"):
-                self._proxy_to_handler(
-                    __import__("api.auth" if "auth" in path else "api.user", fromlist=["handler"]).handler,
-                    "POST"
-                )
+            if path.startswith("/api/auth/send-otp"):
+                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                self._auth_send_otp(body)
+                return
+            elif path.startswith("/api/auth/verify-otp"):
+                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                self._auth_verify_otp(body)
+                return
+            elif path.startswith("/api/auth/complete-profile"):
+                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                self._auth_complete_profile(body)
+                return
+            elif path.startswith("/api/auth/session"):
+                body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                token = body.get("token", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Invalid session"})
+                else:
+                    self._respond(200, {"user_id": uid})
+                return
+            elif path.startswith("/api/user/profile"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._update_user_profile(uid, body)
+                return
+            elif path.startswith("/api/user/cards"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._add_user_card(uid, body)
+                return
+            elif path.startswith("/api/user/persons"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._add_user_person(uid, body)
+                return
+            elif path.startswith("/api/user/outfits"):
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._save_user_outfit(uid, body)
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
@@ -626,16 +929,45 @@ class handler(BaseHTTPRequestHandler):
 
             # ── User Profile DELETE (no API key) ─────────────────────
             if path.startswith("/api/user/"):
-                from api.user import handler as user_h
-                h = user_h()
-                h.rfile = self.rfile
-                h.wfile = self.wfile
-                h.headers = self.headers
-                h.path = self.path
-                h.command = "DELETE"
-                h.request_version = self.request_version
-                h.close_connection = True
-                h.do_DELETE()
+                token = self.headers.get("Authorization", "").replace("Bearer ", "")
+                uid = self._auth_verify_token(token)
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                    return
+                from urllib.parse import parse_qs
+                query = parse_qs(parsed.query)
+                if path == "/api/user/cards":
+                    card_id = query.get("card_id", [None])[0]
+                    if not card_id:
+                        self._respond(400, {"error": "card_id required"})
+                    else:
+                        try:
+                            sb_request("DELETE", f"/rest/v1/mn_saved_cards?card_id=eq.{card_id}&user_id=eq.{uid}")
+                            self._respond(200, {"ok": True})
+                        except Exception as e:
+                            self._respond(500, {"error": str(e)})
+                elif path == "/api/user/persons":
+                    person_id = query.get("person_id", [None])[0]
+                    if not person_id:
+                        self._respond(400, {"error": "person_id required"})
+                    else:
+                        try:
+                            sb_request("DELETE", f"/rest/v1/mn_person_profiles?person_id=eq.{person_id}&user_id=eq.{uid}")
+                            self._respond(200, {"ok": True})
+                        except Exception as e:
+                            self._respond(500, {"error": str(e)})
+                elif path == "/api/user/outfits":
+                    outfit_id = query.get("outfit_id", [None])[0]
+                    if not outfit_id:
+                        self._respond(400, {"error": "outfit_id required"})
+                    else:
+                        try:
+                            sb_request("DELETE", f"/rest/v1/mn_saved_outfits?outfit_id=eq.{outfit_id}&user_id=eq.{uid}")
+                            self._respond(200, {"ok": True})
+                        except Exception as e:
+                            self._respond(500, {"error": str(e)})
+                else:
+                    self._respond(404, {"error": "not_found"})
                 return
 
             self._respond(404, {"error": "not_found"})

@@ -5,17 +5,9 @@
     },
     "api/cron_reconciliation.py": {
       "maxDuration": 60
-    },
-    "api/auth.py": {
-      "maxDuration": 15
-    },
-    "api/user.py": {
-      "maxDuration": 15
     }
   },
   "rewrites": [
-    { "source": "/api/auth/(.*)", "destination": "/api/auth" },
-    { "source": "/api/user/(.*)", "destination": "/api/user" },
     { "source": "/api/(.*)", "destination": "/api/b2b_gateway" },
     { "source": "/c/:click_id", "destination": "/api/b2b_gateway" }
   ],
