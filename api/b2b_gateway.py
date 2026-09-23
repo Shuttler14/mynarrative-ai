@@ -159,6 +159,74 @@ class handler(BaseHTTPRequestHandler):
                 stats[key] = 0
         self._respond(200, stats)
 
+    def _handle_best_price(self, uid, body):
+        """Calculate best price for items using user's saved cards and merchant offers."""
+        items = body.get("items", [])
+        if not items:
+            self._respond(400, {"error": "items required"})
+            return
+        try:
+            cards = sb_request("GET", f"/rest/v1/mn_saved_cards?user_id=eq.{uid}&select=bank_name,card_variant")
+        except Exception:
+            cards = []
+        results = []
+        total_original = 0
+        total_discount = 0
+        for item in items:
+            price = float(item.get("price", 0))
+            merchant = item.get("merchant", "")
+            category = item.get("category", "fashion")
+            best_offer = None
+            best_discount = 0
+            for card in cards:
+                bank = card.get("bank_name", "")
+                try:
+                    offers = sb_request("GET", f"/rest/v1/mn_offers?bank_name=eq.{bank}&merchant_name=eq.{merchant}&is_active=eq.true&state=eq.active&select=*")
+                except Exception:
+                    offers = []
+                for offer in offers:
+                    min_spend = float(offer.get("min_purchase", 0) or 0)
+                    if price < min_spend:
+                        continue
+                    variants = offer.get("card_variants", []) or []
+                    if variants and card.get("card_variant", "") not in variants:
+                        continue
+                    excl_cats = offer.get("excluded_categories", []) or []
+                    if category and category in excl_cats:
+                        continue
+                    disc_type = offer.get("discount_type", "percentage")
+                    disc_val = float(offer.get("discount_value", 0))
+                    max_disc = float(offer.get("max_discount", 999999) or 999999)
+                    if disc_type == "percentage":
+                        discount = min(price * disc_val / 100, max_disc)
+                    else:
+                        discount = min(disc_val, price)
+                    if discount > best_discount:
+                        best_discount = discount
+                        best_offer = {
+                            "offer_id": offer.get("offer_id"),
+                            "bank_name": bank,
+                            "card_variant": card.get("card_variant"),
+                            "discount_amount": round(discount, 2),
+                            "terms": offer.get("terms", ""),
+                            "confidence": float(offer.get("confidence_score", 0.5)),
+                        }
+            results.append({
+                "price": price,
+                "merchant": merchant,
+                "effective_price": round(price - best_discount, 2),
+                "discount": round(best_discount, 2),
+                "offer": best_offer,
+            })
+            total_original += price
+            total_discount += best_discount
+        self._respond(200, {
+            "items": results,
+            "total_original": round(total_original, 2),
+            "total_discount": round(total_discount, 2),
+            "total_effective": round(total_original - total_discount, 2),
+        })
+
     def _update_user_profile(self, uid, body):
         """Update user profile fields. Body/style fields go to person_profiles (self)."""
         # Fields on mn_user_profiles
@@ -271,6 +339,53 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._respond(500, {"error": str(e)})
 
+    def _save_tryon_session(self, uid, body):
+        session_id = f"tryon_{int(_time.time())}_{hashlib.sha256(uid.encode()).hexdigest()[:8]}"
+        session = {"session_id": session_id, "user_id": uid,
+                   "person_id": body.get("person_id"),
+                   "outfit_id": body.get("outfit_id"),
+                   "host_image_url": body.get("host_image_url"),
+                   "product_image_url": body.get("product_image_url"),
+                   "result_image_url": body.get("result_image_url"),
+                   "status": body.get("status", "completed"),
+                   "vton_model": body.get("vton_model", "idm-vton")}
+        try:
+            result = sb_request("POST", "/rest/v1/mn_tryon_sessions", session)
+            self._respond(201, result[0] if result else session)
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _save_user_media(self, uid, body):
+        media_id = f"media_{int(_time.time())}_{hashlib.sha256(uid.encode()).hexdigest()[:8]}"
+        media = {"media_id": media_id, "user_id": uid,
+                 "media_type": body.get("media_type", "profile_photo"),
+                 "file_url": body.get("file_url", ""),
+                 "source": body.get("source", "upload"),
+                 "metadata": body.get("metadata", {})}
+        try:
+            result = sb_request("POST", "/rest/v1/mn_user_media", media)
+            self._respond(201, result[0] if result else media)
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _save_user_preferences(self, uid, body):
+        pref_key = body.get("pref_key", "")
+        if not pref_key:
+            self._respond(400, {"error": "pref_key required"})
+            return
+        pref = {"user_id": uid, "pref_key": pref_key,
+                "pref_value": body.get("pref_value", {}),
+                "source": body.get("source", "wizard")}
+        try:
+            existing = sb_request("GET", f"/rest/v1/mn_user_preferences?user_id=eq.{uid}&pref_key=eq.{pref_key}&select=pref_key")
+            if existing:
+                sb_request("PATCH", f"/rest/v1/mn_user_preferences?user_id=eq.{uid}&pref_key=eq.{pref_key}", {"pref_value": pref["pref_value"]})
+            else:
+                sb_request("POST", "/rest/v1/mn_user_preferences", pref)
+            self._respond(201, {"ok": True})
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors_headers(self.headers.get("Origin", ""))
@@ -356,6 +471,12 @@ class handler(BaseHTTPRequestHandler):
                     self._handle_user_outfits(uid)
                 elif path == "/api/user/stats":
                     self._handle_user_stats(uid)
+                elif path == "/api/user/best-price":
+                    uid2 = self._get_shopify_uid()
+                    if not uid2:
+                        self._respond(401, {"error": "Authentication required"})
+                    else:
+                        self._handle_best_price(uid2, {})
                 else:
                     self._respond(404, {"error": "Not found"})
 
@@ -498,6 +619,38 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
                     self._sync_user_profile(uid, body)
+                return
+            elif path.startswith("/api/user/best-price"):
+                uid = self._get_shopify_uid()
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._handle_best_price(uid, body)
+                return
+            elif path.startswith("/api/user/tryon-sessions"):
+                uid = self._get_shopify_uid()
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._save_tryon_session(uid, body)
+                return
+            elif path.startswith("/api/user/media"):
+                uid = self._get_shopify_uid()
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._save_user_media(uid, body)
+                return
+            elif path.startswith("/api/user/preferences"):
+                uid = self._get_shopify_uid()
+                if not uid:
+                    self._respond(401, {"error": "Authentication required"})
+                else:
+                    body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+                    self._save_user_preferences(uid, body)
                 return
 
             if content_length > 512000:
