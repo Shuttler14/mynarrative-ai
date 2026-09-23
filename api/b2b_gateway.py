@@ -181,7 +181,7 @@ class handler(BaseHTTPRequestHandler):
             for card in cards:
                 bank = card.get("bank_name", "")
                 try:
-                    offers = sb_request("GET", f"/rest/v1/mn_offers?bank_name=eq.{bank}&merchant_name=eq.{merchant}&is_active=eq.true&state=eq.active&select=*")
+                    offers = sb_request("GET", f"/rest/v1/mn_merchant_offers?bank_name=eq.{bank}&merchant_name=eq.{merchant}&is_active=eq.true&select=*")
                 except Exception:
                     offers = []
                 for offer in offers:
